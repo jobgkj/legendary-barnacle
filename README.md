@@ -39,3 +39,47 @@ To address the challenge of segmenting micro-pores and fine cracks amidst imagin
 │   └── metrics.py          # Dice, IoU, and Precision/Recall calculations
 ├── README.md
 └── requirements.txt        # Environment dependencies
+
+```
+
+## 🛠️ Installation & Environment
+We recommend using conda to manage the specialized CUDA environment required for 3D volumetric deep learning.
+
+```text
+# Create the environment
+conda create -n podfam_env python=3.11
+
+# Activate the environment
+conda activate podfam_env
+
+# Install PyTorch with CUDA 11.8 support
+conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+
+# Install additional dependencies
+pip install numpy scikit-image h5py matplotlib pandas
+
+```
+---
+
+## 📊 Evaluation Results
+
+The models are evaluated on a $512^3$ experimental volume. Performance is logged in Test_Results.csv, focusing on:Dice Similarity Coefficient (DSC)Mean Intersection over Union (mIoU)Inference Time per Volume
+
+---
+## 🎓 Acknowledgments & References
+
+This research is conducted within the PODFAM project framework at University West.
+
+<a id="1">[1]</a> 
+Oktay, O., et al. (2018). Attention U-Net: Learning Where to Look for the Pancreas.Ronneberger, O., et al. (2015)
+
+<a id="2">[2]</a> 
+Ronneberger, O., et al. (2015). U-Net: Convolutional Networks for Biomedical Image Segmentation.
+
+<a id="3">[3]</a> 
+University West / PODFAM Team for providing XCT datasets and research guidance.
+
+---
+Author: Job George Konnoth Joseph
+
+Contact: job-george.konnoth-joseph@student.hv.se
