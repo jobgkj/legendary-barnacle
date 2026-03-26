@@ -63,7 +63,7 @@ industrial-ct-unet-3d/
 │
 └── results/       # Optional output directory
 ```
-**Note:** Industrial XCT data and trained model weights are intentionally excluded from version control.
+**Note:** XCT data and trained model weights are intentionally excluded from version control.
 
 ---
 
