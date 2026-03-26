@@ -1,69 +1,110 @@
-# Automated XCT Data Analysis for Defect Detection and Segmentation in Additively Manufactured Metal Parts
+# Automated XCT Defect Segmentation and Evaluation for Additively Manufactured Metal Parts
 
 ## 🔬 Project Overview
-This project is part of the **PODFAM research initiative** at **University West**. The goal is to develop a robust, automated backend for the segmentation and classification of internal defects (pores, cracks, and inclusions) in X-ray Computed Tomography (XCT) data of Additively Manufactured (AM) metal components.
+This repository provides an **evaluation and visualization pipeline** for deep learning–based
+segmentation of internal defects (pores, cracks, inclusions) in **industrial X-ray Computed
+Tomography (XCT)** data of additively manufactured (AM) metal components.
 
-By transitioning from manual analysis to Deep Learning-based segmentation, this tool aims to improve reliability, standardize defect characterization, and reduce computational overhead in the Quality Assurance (QA) workflow.
+The work is conducted within the **PODFAM research initiative at University West**, and focuses on
+**voxel-level defect validation**, enabling reliable and standardized quality assessment of XCT volumes.
+
+This repository represents a **foundational backend component** for XCT defect analysis and is intended
+to support ongoing model development and benchmarking efforts.
+
+---
 
 ## 🚀 Key Features
-- **3D Voxel Processing:** Native 3D segmentation using volumetric patches (64x64x64).
-- **Advanced Architectures:** Comparative implementation of **3D U-Net** and **Attention U-Net**.
-- **Automated Denoising:** Integrated preprocessing pipeline using Non-Local Means (NLM) filtering.
-- **Quantitative Metrics:** Automated calculation of **Dice Coefficients** and **Intersection over Union (IoU)** for defect validation.
+
+- **3D Voxel-Based Processing**  
+  Native volumetric processing of industrial XCT data represented as 3D TIFF stacks.
+
+- **3D U-Net Inference**  
+  Encoder–decoder architecture optimized for volumetric defect segmentation.
+
+- **Robust Industrial XCT Normalization**  
+  Percentile-based intensity normalization to mitigate metal artifacts and beam hardening effects.
+
+- **Quantitative Evaluation Metrics**  
+  Automated voxel-wise computation of:
+  - Dice Similarity Coefficient (DSC)
+  - Intersection over Union (IoU)
+
+- **Interactive 3D Visualization**  
+  Single-window 3D surface rendering of:
+  - Ground truth defects
+  - Predicted defects
+  - True-positive overlap regions
 
 ---
 
 ## 🏗️ Architecture Description
 
-### 1. 3D U-Net (Baseline)
-The baseline model follows the classic encoder-decoder structure. It utilizes skip connections to concatenate high-resolution features from the contracting path with the upsampled outputs, ensuring that fine-grained spatial details of small defects are preserved.
+### 3D U-Net (Baseline)
+The implemented 3D U-Net follows a classical encoder–decoder structure with skip connections that
+preserve spatial context across scales. This architecture is well-suited for industrial XCT data,
+where defect morphology varies significantly in size and shape.
 
-### 2. Attention 3D U-Net
-To address the challenge of segmenting micro-pores and fine cracks amidst imaging artifacts, we implement **Attention Gates (AGs)**. These gates automatically learn to focus on target structures of varying shapes and sizes. By suppressing feature responses in irrelevant background regions, the Attention U-Net achieves higher sensitivity in low-contrast XCT volumes.
+The model operates directly on voxel volumes reconstructed from sequential TIFF slices.
 
 ---
 
 ## 📁 Repository Structure
-
-```text
-├── models/
-│   ├── unet3d.py           # Standard 3D U-Net implementation
-│   └── attention_unet.py   # Attention U-Net with Gating modules
-├── preprocessing/
-│   ├── denoising.py        # NLM and Median filtering scripts
-│   └── patch_extractor.py  # Sliding window 3D patch generation
-├── notebooks/
-│   ├── training.ipynb      # Training loops and loss curve visualization
-│   └── inference.ipynb     # Volume reconstruction and overlap averaging
-├── evaluation/
-│   └── metrics.py          # Dice, IoU, and Precision/Recall calculations
+```bash
+industrial-ct-unet-3d/
+├── industrial_ct_3d_unet_eval_and_visualize.py
+├── requirements.txt
 ├── README.md
-└── requirements.txt        # Environment dependencies
-
+├── .gitignore
+│
+├── dataset/
+│   ├── README.md
+│   ├── volume/    # Placeholder for XCT slices (not included)
+│   └── label/     # Placeholder for ground truth slices (not included)
+│
+└── results/       # Optional output directory
 ```
+**Note:** Industrial XCT data and trained model weights are intentionally excluded from version control.
+
+---
 
 ## 🛠️ Installation & Environment
-We recommend using conda to manage the specialized CUDA environment required for 3D volumetric deep learning.
 
-```text
-# Create the environment
-conda create -n podfam_env python=3.11
+We recommend using Conda for managing the CUDA-enabled environment.
 
-# Activate the environment
+```bash
+conda create -n podfam_env python=3.10
 conda activate podfam_env
+pip install -r requirements.txt
+```
+---
+▶️ Running the Evaluation
+Ensure the dataset is structured as follows (locally):
+```bash
+dataset/
+├── volume/
+│   ├── slice_000.tif
+│   ├── slice_001.tif
+│   └── ...
+├── label/
+│   ├── slice_000.tif
+│   ├── slice_001.tif
+│   └── ...
+└── model.pth
+```
+Then run:
 
-# Install PyTorch with CUDA 11.8 support
-conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
-
-# Install additional dependencies
-pip install numpy scikit-image h5py matplotlib pandas
-
+```bash
+python industrial_ct_3d_unet_eval_and_visualize.py
 ```
 ---
 
-## 📊 Evaluation Results
+📊 Evaluation Output
+The script reports:
 
-The models are evaluated on a $512^3$ experimental volume. Performance is logged in Test_Results.csv, focusing on:Dice Similarity Coefficient (DSC)Mean Intersection over Union (mIoU)Inference Time per Volume
+Dice Similarity Coefficient (DSC)
+Intersection over Union (IoU)
+
+An interactive 3D visualization window is launched to support qualitative inspection of the segmentation results.
 
 ---
 ## 🎓 Acknowledgments & References
