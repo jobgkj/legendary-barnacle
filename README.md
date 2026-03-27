@@ -1,75 +1,123 @@
-# Automated XCT Defect Segmentation and Evaluation for Additively Manufactured Metal Parts
+# Automated XCT Defect Segmentation and Evaluation
+## for Additively Manufactured Metal Parts
+
+---
 
 ## 🔬 Project Overview
-This repository provides an **evaluation and visualization pipeline** for deep learning–based
-segmentation of internal defects (pores, cracks, inclusions) in **industrial X-ray Computed
-Tomography (XCT)** data of additively manufactured (AM) metal components.
 
-The work is conducted within the **PODFAM research initiative at University West**, and focuses on
-**voxel-level defect validation**, enabling reliable and standardized quality assessment of XCT volumes.
+This repository provides a **training, evaluation, and visualization framework** for deep learning–based
+segmentation of internal defects (pores, lack‑of‑fusion defects, cracks) in **industrial X‑ray Computed
+Tomography (XCT)** data of **additively manufactured (AM) metal components**.
 
-This repository represents a **foundational backend component** for XCT defect analysis and is intended
-to support ongoing model development and benchmarking efforts.
+The work is conducted within the **PODFAM research initiative at University West** and focuses on
+**voxel‑level defect segmentation and validation**, enabling reliable and reproducible quality
+assessment of XCT volumes in metal additive manufacturing.
+
+The repository supports:
+- **Model training (2D and 3D U‑Net)**
+- **Quantitative benchmarking**
+- **Volumetric visualization**
+
+and is intended to serve as a **research backend for XCT defect analysis and method comparison**.
 
 ---
 
 ## 🚀 Key Features
 
-- **3D Voxel-Based Processing**  
-  Native volumetric processing of industrial XCT data represented as 3D TIFF stacks.
+- **Volumetric XCT Processing**  
+  Native handling of industrial XCT data represented as 3D TIFF image stacks.
 
-- **3D U-Net Inference**  
-  Encoder–decoder architecture optimized for volumetric defect segmentation.
+- **2D & 3D U‑Net Architectures**
+  - **2D U‑Net**: slice‑wise baseline for reviewer comparison
+  - **3D U‑Net**: patch‑based volumetric model exploiting full 3D context
 
-- **Robust Industrial XCT Normalization**  
-  Percentile-based intensity normalization to mitigate metal artifacts and beam hardening effects.
+- **Industrial XCT‑Specific Normalization**  
+  Percentile‑based intensity normalization to mitigate:
+  - Beam hardening
+  - Metal artifacts
+  - Scan‑to‑scan intensity variation
+
+- **Training with Class‑Imbalance‑Aware Loss**  
+  Combined **Dice + Binary Cross‑Entropy (BCE)** loss to improve sensitivity to small defects.
 
 - **Quantitative Evaluation Metrics**  
-  Automated voxel-wise computation of:
+  Automated voxel‑wise computation of:
   - Dice Similarity Coefficient (DSC)
   - Intersection over Union (IoU)
 
 - **Interactive 3D Visualization**  
-  Single-window 3D surface rendering of:
-  - Ground truth defects
+  Volumetric surface rendering of:
+  - Ground‑truth defects
   - Predicted defects
-  - True-positive overlap regions
+  - True‑positive overlap regions
 
 ---
 
 ## 🏗️ Architecture Description
 
-### 3D U-Net (Baseline)
-The implemented 3D U-Net follows a classical encoder–decoder structure with skip connections that
-preserve spatial context across scales. This architecture is well-suited for industrial XCT data,
-where defect morphology varies significantly in size and shape.
+### 2D U‑Net (Baseline)
+A standard encoder–decoder U‑Net applied **slice‑by‑slice** to XCT volumes.  
+This baseline evaluates whether in‑plane context alone is sufficient for defect segmentation and serves
+as a **mandatory comparison baseline** in AM‑XCT literature.
 
-The model operates directly on voxel volumes reconstructed from sequential TIFF slices.
+### 3D U‑Net (Primary Model)
+A volumetric U‑Net trained and inferred using **overlapping 3D patches** extracted from XCT volumes.
+Patch‑based processing enables robust learning of:
+- Volumetric defect connectivity
+- Elongated lack‑of‑fusion defects
+- Irregular pore morphology
+
+Both models use **Instance Normalization**, which is better suited than Batch Normalization for small
+batch sizes typical of XCT workflows.
+
+---
+
+## 🧠 Training Strategy
+
+### Data Sources
+Due to the limited availability of fully annotated public AM‑XCT datasets, training data are sourced from:
+
+- **NIST Additive Manufacturing Metrology Testbed (AMMT) XCT datasets**
+  (e.g., Overhang Part X4 / X16)
+- **NIST high‑resolution LPBF XCT datasets with segmented volumes**
+- **In‑house Ti‑6Al‑4V XCT data (PODFAM project)**
+
+Voxel‑level defect labels are generated using **adaptive thresholding followed by expert correction**,
+which is consistent with standard practice in AM‑XCT studies.
+
+### Training Setup
+- **2D U‑Net**: slice‑wise training
+- **3D U‑Net**: patch‑based volumetric training
+- **Loss**: Dice + Binary Cross‑Entropy
+- **Optimization**: Adam
+- **Evaluation**: Held‑out XCT volumes
 
 ---
 
 ## 📁 Repository Structure
+
 ```bash
-industrial-ct-unet-3d/
-├── industrial_ct_3d_unet_eval_and_visualize.py
+podfam_research_project_XCT_Analysis/
+├── industrial_ct_unet_training.py          # Training (2D + 3D U-Net)
+├── industrial_ct_unet_2d_vs_3d_eval.py     # Evaluation & comparison
+├── models.py                               # UNet2D and UNet3D definitions
 ├── requirements.txt
 ├── README.md
 ├── .gitignore
 │
 ├── dataset/
 │   ├── README.md
-│   ├── volume/    # Placeholder for XCT slices (not included)
-│   └── label/     # Placeholder for ground truth slices (not included)
+│   ├── volume/        # XCT TIFF stacks (not included)
+│   ├── label/         # Ground truth masks (not included)
+│   ├── model_2d.pth   # Trained 2D model (generated)
+│   └── model_3d.pth   # Trained 3D model (generated)
 │
-└── results/       # Optional output directory
-```
-**Note:** XCT data and trained model weights are intentionally excluded from version control.
+└── results/           # Optional output directory
 
----
 
 ## 🛠️ Installation & Environment
 
-We recommend using Conda for managing the CUDA-enabled environment.
+A CUDA‑enabled Python environment is recommended.
 
 ```bash
 conda create -n podfam_env python=3.10
@@ -77,9 +125,10 @@ conda activate podfam_env
 pip install -r requirements.txt
 ```
 ---
-▶️ Running the Evaluation
-Ensure the dataset is structured as follows (locally):
+🧪 Training the Models
+Prepare local data:
 ```bash
+dataset/
 dataset/
 ├── volume/
 │   ├── slice_000.tif
@@ -89,36 +138,71 @@ dataset/
 │   ├── slice_000.tif
 │   ├── slice_001.tif
 │   └── ...
-└── model.pth
+``
 ```
-Then run:
+Run training:
 
 ```bash
-python industrial_ct_3d_unet_eval_and_visualize.py
+python industrial_ct_unet_training.py
 ```
+This produces:
+
+dataset/model_2d.pth
+dataset/model_3d.pth
 ---
 
-📊 Evaluation Output
-The script reports:
+▶️ Evaluation & Visualization
+
+```bash
+python industrial_ct_unet_2d_vs_3d_eval.py
+```
+Outputs
 
 Dice Similarity Coefficient (DSC)
 Intersection over Union (IoU)
+Direct 2D vs 3D comparison
+Interactive 3D visualization
 
-An interactive 3D visualization window is launched to support qualitative inspection of the segmentation results.
+---
+📊 Intended Use
+
+This repository is designed for:
+
+Research benchmarking (2D vs 3D XCT segmentation)
+Development of new architectures (e.g., attention U‑Net, 2.5D models)
+Supporting PODFAM and related AM‑XCT research
+
+It is not intended as a production inspection system, but as a research and validation platform.
 
 ---
 ## 🎓 Acknowledgments & References
 
-This research is conducted within the PODFAM project framework at University West.
+This work is conducted within the PODFAM research initiative at University West, Sweden.
 
-<a id="1">[1]</a> 
-Oktay, O., et al. (2018). Attention U-Net: Learning Where to Look for the Pancreas.Ronneberger, O., et al. (2015)
+<a id="1">[1]</a>
+Ronneberger, O., Fischer, P., & Brox, T. (2015). 
+U‑Net: Convolutional Networks for Biomedical Image Segmentation. 
+Proceedings of MICCAI. https://doi.org/10.1007/978-3-319-24574-4_28
 
 <a id="2">[2]</a> 
-Ronneberger, O., et al. (2015). U-Net: Convolutional Networks for Biomedical Image Segmentation.
+Oktay, O., Schlemper, J., Folgoc, L. L., et al. (2018). 
+Attention U‑Net: Learning Where to Look for the Pancreas. 
+arXiv preprint. https://arxiv.org/abs/1804.03999
 
 <a id="3">[3]</a> 
-University West / PODFAM Team for providing XCT datasets and research guidance.
+Bellens, S., Vandewalle, P., & Dewulf, W. (2021). 
+Deep Learning–Based Porosity Segmentation in X‑ray CT Measurements of Additive Manufacturing Parts. 
+Procedia CIRP, 96, 336–341. https://doi.org/10.1016/j.procir.2021.01.157
+
+<a id="4">[4]</a> 
+Xu, C., Wang, F., Wei, G., et al. (2024). 
+High‑Performance Deep Learning Segmentation for Non‑Destructive Testing of X‑ray Tomography. 
+Journal of Manufacturing Processes, 128, 98–110. https://doi.org/10.1016/j.jmapro.2024.08.031
+
+<a id="5">[5]</a> 
+Praniewicz, M., Lane, B., Kim, F., & Saldana, C. (2020). 
+X‑ray Computed Tomography Data of Additive Manufacturing Metrology Testbed (AMMT) Parts: Overhang Part X4. 
+Journal of Research of NIST, 125. https://doi.org/10.6028/jres.125.031
 
 ---
 Author: Job George Konnoth Joseph
