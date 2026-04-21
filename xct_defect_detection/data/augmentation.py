@@ -1,17 +1,12 @@
 """
 =============================================================================
-Data Augmentation Pipeline
+Data Augmentation
 =============================================================================
-Implements 7 different augmentation transforms for XCT defect detection:
-    1. Horizontal/vertical flips
-    2. 90-degree rotations
-    3. Elastic deformations
-    4. Intensity scaling
-    5. Gaussian noise
-    6. Gamma correction
-    7. Combined random application
+Online augmentation transforms applied during training to improve model
+robustness and reduce overfitting to scan-specific characteristics.
 
-All transforms preserve the mask-image correspondence exactly.
+All transforms operate on (H, W) numpy arrays and are applied identically
+to the image patch and its corresponding mask patch to maintain alignment.
 =============================================================================
 """
 
@@ -28,115 +23,179 @@ from config import (
 )
 
 
-class XCTAugmentor:
-    """Composable augmentation transforms for XCT patches."""
+def random_flip(image: np.ndarray,
+                mask:  np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Randomly flip image and mask horizontally and/or vertically.
 
-    @staticmethod
-    def flip_horizontal(image: np.ndarray, mask: np.ndarray) -> tuple:
-        """Flip horizontally with probability AUG_FLIP_PROB."""
-        if np.random.rand() < AUG_FLIP_PROB:
-            image = np.fliplr(image)
-            mask  = np.fliplr(mask)
+    Parameters
+    ----------
+    image : np.ndarray  — float32 patch (H, W)
+    mask  : np.ndarray  — uint8 mask patch (H, W)
+
+    Returns
+    -------
+    Augmented (image, mask) tuple.
+    """
+    if np.random.random() < AUG_FLIP_PROB:
+        image = np.fliplr(image)
+        mask  = np.fliplr(mask)
+    if np.random.random() < AUG_FLIP_PROB:
+        image = np.flipud(image)
+        mask  = np.flipud(mask)
+    return image, mask
+
+
+def random_rotate90(image: np.ndarray,
+                    mask:  np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Randomly rotate image and mask by a multiple of 90 degrees.
+
+    Parameters
+    ----------
+    image : np.ndarray  — float32 patch (H, W)
+    mask  : np.ndarray  — uint8 mask patch (H, W)
+
+    Returns
+    -------
+    Augmented (image, mask) tuple.
+    """
+    if np.random.random() < AUG_ROTATE_PROB:
+        k     = np.random.choice([1, 2, 3])    # 90, 180, or 270 degrees
+        image = np.rot90(image, k)
+        mask  = np.rot90(mask,  k)
+    return image, mask
+
+
+def elastic_deformation(image: np.ndarray,
+                        mask:  np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Apply random elastic deformation to simulate scan variability.
+
+    Generates a smooth random displacement field by convolving a random
+    noise field with a Gaussian kernel. The same displacement field is
+    applied to both image and mask to preserve alignment.
+
+    Parameters
+    ----------
+    image : np.ndarray  — float32 patch (H, W)
+    mask  : np.ndarray  — uint8 mask patch (H, W)
+
+    Returns
+    -------
+    Augmented (image, mask) tuple.
+    """
+    if np.random.random() >= AUG_ELASTIC_PROB:
         return image, mask
 
-    @staticmethod
-    def flip_vertical(image: np.ndarray, mask: np.ndarray) -> tuple:
-        """Flip vertically with probability AUG_FLIP_PROB."""
-        if np.random.rand() < AUG_FLIP_PROB:
-            image = np.flipud(image)
-            mask  = np.flipud(mask)
-        return image, mask
+    h, w = image.shape
 
-    @staticmethod
-    def rotate_90(image: np.ndarray, mask: np.ndarray) -> tuple:
-        """Randomly rotate 90, 180, or 270 degrees."""
-        if np.random.rand() < AUG_ROTATE_PROB:
-            k = np.random.randint(1, 4)  # 1 = 90°, 2 = 180°, 3 = 270°
-            image = np.rot90(image, k=k)
-            mask  = np.rot90(mask,  k=k)
-        return image, mask
+    # Random displacement fields
+    dx = gaussian_filter(
+        (np.random.rand(h, w) * 2 - 1), AUG_ELASTIC_SIGMA
+    ) * AUG_ELASTIC_ALPHA
 
-    @staticmethod
-    def elastic_deformation(image: np.ndarray, mask: np.ndarray) -> tuple:
-        """Apply elastic deformation via random displacement fields."""
-        if np.random.rand() < AUG_ELASTIC_PROB:
-            h, w = image.shape
-            
-            # Random displacement field
-            dx = gaussian_filter(
-                (np.random.rand(h, w) * 2 - 1) * AUG_ELASTIC_ALPHA,
-                sigma=AUG_ELASTIC_SIGMA
-            )
-            dy = gaussian_filter(
-                (np.random.rand(h, w) * 2 - 1) * AUG_ELASTIC_ALPHA,
-                sigma=AUG_ELASTIC_SIGMA
-            )
+    dy = gaussian_filter(
+        (np.random.rand(h, w) * 2 - 1), AUG_ELASTIC_SIGMA
+    ) * AUG_ELASTIC_ALPHA
 
-            # Apply displacement
-            x, y = np.meshgrid(np.arange(w), np.arange(h))
-            indices_x = np.reshape(x + dx, (-1, 1))
-            indices_y = np.reshape(y + dy, (-1, 1))
-            indices   = np.concatenate([indices_y, indices_x], axis=1).T
+    # Compute displaced coordinates
+    x, y      = np.meshgrid(np.arange(w), np.arange(h))
+    coords_x  = np.clip(x + dx, 0, w - 1)
+    coords_y  = np.clip(y + dy, 0, h - 1)
+    coords    = [coords_y.ravel(), coords_x.ravel()]
 
-            # Interpolate image and mask
-            image = map_coordinates(image, indices, order=1, mode='reflect')
-            image = image.reshape((h, w))
-            mask  = map_coordinates(mask,  indices, order=0, mode='reflect')
-            mask  = mask.reshape((h, w))
+    image_def = map_coordinates(image, coords, order=1).reshape(h, w)
+    mask_def  = map_coordinates(
+        mask.astype(np.float32), coords, order=0
+    ).reshape(h, w).astype(np.uint8)
 
-        return image, mask
+    return image_def.astype(np.float32), mask_def
 
-    @staticmethod
-    def intensity_scaling(image: np.ndarray, mask: np.ndarray) -> tuple:
-        """Scale intensity by random factor in AUG_INTENSITY_RANGE."""
-        if np.random.rand() < AUG_INTENSITY_PROB:
-            factor = np.random.uniform(*AUG_INTENSITY_RANGE)
-            image  = np.clip(image * factor, 0.0, 1.0)
-        return image, mask
 
-    @staticmethod
-    def gaussian_noise(image: np.ndarray, mask: np.ndarray) -> tuple:
-        """Add Gaussian noise with std in AUG_NOISE_STD_RANGE."""
-        if np.random.rand() < AUG_NOISE_PROB:
-            std   = np.random.uniform(*AUG_NOISE_STD_RANGE)
-            noise = np.random.normal(0, std, image.shape)
-            image = np.clip(image + noise, 0.0, 1.0)
-        return image, mask
+def random_intensity_scale(image: np.ndarray,
+                            mask:  np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Randomly scale voxel intensities to simulate acquisition variability.
 
-    @staticmethod
-    def gamma_correction(image: np.ndarray, mask: np.ndarray) -> tuple:
-        """Apply gamma correction with gamma in AUG_GAMMA_RANGE."""
-        if np.random.rand() < AUG_GAMMA_PROB:
-            gamma  = np.random.uniform(*AUG_GAMMA_RANGE)
-            image  = np.power(image, gamma)
-        return image, mask
+    Parameters
+    ----------
+    image : np.ndarray  — float32 patch (H, W), values in [0, 1]
+    mask  : np.ndarray  — uint8 mask patch (H, W)  [unchanged]
 
-    @staticmethod
-    def augment(image: np.ndarray, mask: np.ndarray) -> tuple:
-        """
-        Apply full augmentation pipeline in order:
-            1. Flips (horizontal + vertical)
-            2. Rotations
-            3. Elastic deformation
-            4. Intensity scaling
-            5. Gaussian noise
-            6. Gamma correction
+    Returns
+    -------
+    Augmented (image, mask) tuple.
+    """
+    if np.random.random() < AUG_INTENSITY_PROB:
+        scale = np.random.uniform(*AUG_INTENSITY_RANGE)
+        image = np.clip(image * scale, 0.0, 1.0)
+    return image, mask
 
-        Parameters
-        ----------
-        image : np.ndarray  — single 2D XCT patch, float32 in [0, 1]
-        mask  : np.ndarray  — corresponding binary mask, uint8
 
-        Returns
-        -------
-        tuple (augmented_image, augmented_mask)  — both float32
-        """
-        image, mask = XCTAugmentor.flip_horizontal(image, mask)
-        image, mask = XCTAugmentor.flip_vertical(image, mask)
-        image, mask = XCTAugmentor.rotate_90(image, mask)
-        image, mask = XCTAugmentor.elastic_deformation(image, mask)
-        image, mask = XCTAugmentor.intensity_scaling(image, mask)
-        image, mask = XCTAugmentor.gaussian_noise(image, mask)
-        image, mask = XCTAugmentor.gamma_correction(image, mask)
+def random_gaussian_noise(image: np.ndarray,
+                           mask:  np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Add random Gaussian noise to simulate detector noise variability.
 
-        return image.astype(np.float32), mask.astype(np.float32)
+    Parameters
+    ----------
+    image : np.ndarray  — float32 patch (H, W), values in [0, 1]
+    mask  : np.ndarray  — uint8 mask patch (H, W)  [unchanged]
+
+    Returns
+    -------
+    Augmented (image, mask) tuple.
+    """
+    if np.random.random() < AUG_NOISE_PROB:
+        std   = np.random.uniform(*AUG_NOISE_STD_RANGE)
+        noise = np.random.normal(0, std, image.shape).astype(np.float32)
+        image = np.clip(image + noise, 0.0, 1.0)
+    return image, mask
+
+
+def random_gamma_correction(image: np.ndarray,
+                             mask:  np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Apply random gamma correction to simulate contrast variability.
+
+    Parameters
+    ----------
+    image : np.ndarray  — float32 patch (H, W), values in [0, 1]
+    mask  : np.ndarray  — uint8 mask patch (H, W)  [unchanged]
+
+    Returns
+    -------
+    Augmented (image, mask) tuple.
+    """
+    if np.random.random() < AUG_GAMMA_PROB:
+        gamma = np.random.uniform(*AUG_GAMMA_RANGE)
+        image = np.clip(image ** gamma, 0.0, 1.0)
+    return image, mask
+
+
+def apply_augmentation(image: np.ndarray,
+                        mask:  np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Apply the full augmentation pipeline to an (image, mask) patch pair.
+
+    All transforms are applied in sequence with their configured
+    probabilities. The same random state affects both image and mask
+    to maintain spatial alignment.
+
+    Parameters
+    ----------
+    image : np.ndarray  — float32 patch (H, W)
+    mask  : np.ndarray  — uint8 mask patch (H, W)
+
+    Returns
+    -------
+    Augmented (image, mask) tuple — same dtypes and shapes as input.
+    """
+    image, mask = random_flip(image,             mask)
+    image, mask = random_rotate90(image,         mask)
+    image, mask = elastic_deformation(image,     mask)
+    image, mask = random_intensity_scale(image,  mask)
+    image, mask = random_gaussian_noise(image,   mask)
+    image, mask = random_gamma_correction(image, mask)
+    return image, mask
