@@ -97,22 +97,23 @@ which is consistent with standard practice in AM‑XCT studies.
 ## 📁 Repository Structure
 
 ```bash
-podfam_research_project_XCT_Analysis/
-├── industrial_ct_unet_training.py          # Training (2D + 3D U-Net)
-├── industrial_ct_unet_2d_vs_3d_eval.py     # Evaluation & comparison
-├── models.py                               # UNet2D and UNet3D definitions
-├── requirements.txt
-├── README.md
-├── .gitignore
+xct_defect_detection/
 │
-├── dataset/
-│   ├── README.md
-│   ├── volume/        # XCT TIFF stacks (not included)
-│   ├── label/         # Ground truth masks (not included)
-│   ├── model_2d.pth   # Trained 2D model (generated)
-│   └── model_3d.pth   # Trained 3D model (generated)
-│
-└── results/           # Optional output directory
+├── config.py                  # All configuration in one place
+├── data/
+│   ├── loader.py              # TIFF stack loading
+│   ├── pseudo_labels.py       # Otsu pseudo-label generation
+│   ├── dataset.py             # PyTorch Dataset + patch extraction
+│   └── augmentation.py        # All augmentation transforms
+├── models/
+│   ├── unet2d.py              # 2D U-Net architecture
+│   └── unet3d.py              # 3D U-Net architecture
+├── training/
+│   ├── losses.py              # BCE, Dice, Focal, Combined losses
+│   ├── metrics.py             # Dice, IoU, Precision, Recall
+│   └── trainer.py             # Training loop + MLflow logging
+├── pipeline.py                # End-to-end pipeline (main entry point)
+└── requirements.txt
 ```
 
 ## 🛠️ Installation & Environment
