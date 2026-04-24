@@ -1,6 +1,0 @@
-torch
-numpy
-tifffile
-pyvista
-scikit-image
-``
