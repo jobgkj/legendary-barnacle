@@ -152,8 +152,8 @@ Common training configuration:
 - Batch size: small (typically 1–4 due to GPU memory constraints)
 
 Training commands:
-    python train_2d.py
-    python train_3d.py
+    python unet2d.py
+    python unet3d.py
 
 Saved models:
 artifacts/
