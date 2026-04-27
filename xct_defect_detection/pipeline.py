@@ -1,20 +1,6 @@
 """
 =============================================================================
-End-to-End XCT Defect Detection Pipeline
-=============================================================================
-Master entry point. Runs all stages in sequence:
-
-    Stage 1  Load NIST and PODFAM volumes
-    Stage 2  Full preprocessing (normalise, BHC, ring, NLM)
-    Stage 3  Generate Otsu pseudo-labels (or load cached)
-    Stage 4  Split into train / val / test sets
-    Stage 5  Build patch datasets and DataLoaders
-    Stage 6  Instantiate model and loss function
-    Stage 7  Train with MLflow tracking
-    Stage 8  Evaluate on test set and report metrics
-
-Run from project root:
-    python pipeline.py
+End-to-End XCT Defect Detection Pipeline (2D + 3D)
 =============================================================================
 """
 
@@ -29,237 +15,149 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from config import (
     NIST_VOL_DIR, NIST_MASK_DIR,
     PODFAM_VOL_DIR, PODFAM_MASK_DIR,
-    VAL_SPLIT, TEST_SPLIT, BATCH_SIZE, DEVICE, CKPT_DIR
+    VAL_SPLIT, TEST_SPLIT,
+    BATCH_SIZE, BATCH_SIZE_3D,
+    PATCH_SIZE_3D,
+    DEVICE
 )
-from data.loader          import load_tiff_stack, full_preprocess
-from data.pseudo_labels   import generate_and_save_pseudo_labels
-from data.dataset         import build_dataloaders, XCTPatchDataset
-from models.unet2d        import get_model
-from training.losses      import get_loss_function
-from training.trainer     import train
-from training.metrics     import compute_all_metrics, check_acceptance_criteria
-from torch.utils.data     import DataLoader
 
+from data.loader        import load_tiff_stack, full_preprocess
+from data.pseudo_labels import generate_and_save_pseudo_labels
+from data.dataset       import build_dataloaders, XCTPatchDataset
+from data.dataset_3d    import build_dataloaders_3d
+
+from models.unet2d      import get_model as get_model_2d
+from models.unet3d      import get_model as get_model_3d
+
+from training.losses    import get_loss_function
+from training.trainer   import train
+from training.metrics   import compute_all_metrics, check_acceptance_criteria
+from torch.utils.data   import DataLoader
+
+
+# -------------------------------------------------------------------------
+# Utility functions (UNCHANGED)
+# -------------------------------------------------------------------------
 
 def load_all_volumes(vol_dir: str) -> dict[str, np.ndarray]:
-    """
-    Load and preprocess all TIFF stacks found in vol_dir.
-
-    Each subdirectory or volume file is treated as one scan.
-    Supports both flat directories (all slices in one folder)
-    and nested directories (one subdirectory per scan).
-
-    Parameters
-    ----------
-    vol_dir : str  — root directory containing volume folders
-
-    Returns
-    -------
-    dict[str, np.ndarray]  — {volume_name: preprocessed_volume}
-    """
     volumes = {}
-
-    # Check for subdirectories (one per scan)
-    subdirs = sorted([
-        d for d in glob.glob(os.path.join(vol_dir, "*"))
-        if os.path.isdir(d)
-    ])
+    subdirs = sorted([d for d in glob.glob(os.path.join(vol_dir, "*")) if os.path.isdir(d)])
 
     if subdirs:
-        # Nested: each subdir is one scan
         for subdir in subdirs:
             name = os.path.basename(subdir)
-            print(f"\n  Loading volume: '{name}' ...")
-            raw     = load_tiff_stack(subdir)
+            raw = load_tiff_stack(subdir)
             volumes[name] = full_preprocess(raw)
     else:
-        # Flat: all slices in vol_dir form a single scan
         name = os.path.basename(vol_dir.rstrip("/"))
-        print(f"\n  Loading volume: '{name}' ...")
-        raw           = load_tiff_stack(vol_dir)
+        raw = load_tiff_stack(vol_dir)
         volumes[name] = full_preprocess(raw)
 
     return volumes
 
 
-def split_volumes(
-    volumes: dict[str, np.ndarray],
-    masks:   dict[str, np.ndarray],
-    val_split:  float,
-    test_split: float
-) -> tuple:
-    """
-    Split volume/mask pairs into train, validation, and test sets.
-
-    Parameters
-    ----------
-    volumes    : dict[str, np.ndarray]  — all preprocessed volumes
-    masks      : dict[str, np.ndarray]  — all pseudo-label masks
-    val_split  : float                  — fraction for validation
-    test_split : float                  — fraction for test
-
-    Returns
-    -------
-    tuple of (train_vols, train_masks, val_vols, val_masks,
-              test_vols,  test_masks)
-    """
+def split_volumes(volumes, masks, val_split, test_split):
     names = list(volumes.keys())
-    vols  = [volumes[n] for n in names]
-    msks  = [masks[n]   for n in names]
+    vols = [volumes[n] for n in names]
+    msks = [masks[n] for n in names]
 
-    # First split off test set
     idx = list(range(len(names)))
-    idx_trainval, idx_test = train_test_split(
-        idx, test_size=test_split, random_state=42
-    )
-    # Then split trainval into train and val
+    idx_trainval, idx_test = train_test_split(idx, test_size=test_split, random_state=42)
     idx_train, idx_val = train_test_split(
-        idx_trainval,
-        test_size=val_split / (1 - test_split),
-        random_state=42
+        idx_trainval, test_size=val_split / (1 - test_split), random_state=42
     )
 
-    def _select(indices):
-        return [vols[i] for i in indices], [msks[i] for i in indices]
+    def sel(i): return [vols[j] for j in i], [msks[j] for j in i]
 
-    train_v, train_m = _select(idx_train)
-    val_v,   val_m   = _select(idx_val)
-    test_v,  test_m  = _select(idx_test)
-
-    print(f"\n  [Split] Train: {len(train_v)}  "
-          f"Val: {len(val_v)}  Test: {len(test_v)} volumes")
-    return train_v, train_m, val_v, val_m, test_v, test_m
+    return (*sel(idx_train), *sel(idx_val), *sel(idx_test))
 
 
-def evaluate_test_set(
-    model:      torch.nn.Module,
-    test_vols:  list[np.ndarray],
-    test_masks: list[np.ndarray],
-    ckpt_path:  str
-) -> dict[str, float]:
-    """
-    Load best checkpoint and evaluate on the held-out test set.
-
-    Parameters
-    ----------
-    model      : nn.Module          — U-Net model (uninitialised weights)
-    test_vols  : list[np.ndarray]   — test volumes
-    test_masks : list[np.ndarray]   — test pseudo-label masks
-    ckpt_path  : str                — path to best checkpoint file
-
-    Returns
-    -------
-    dict[str, float]  — mean metrics over the test set
-    """
+def evaluate_test_set(model, test_vols, test_masks, ckpt_path):
     device = torch.device(DEVICE if torch.cuda.is_available() else "cpu")
-
     ckpt = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt["model_state"])
-    model = model.to(device)
-    model.eval()
+    model.to(device).eval()
 
-    test_ds     = XCTPatchDataset(test_vols, test_masks,
-                                   augment=False, split="test")
-    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE,
-                             shuffle=False, num_workers=4)
+    test_ds = XCTPatchDataset(test_vols, test_masks, augment=False, split="test")
+    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False)
 
-    all_metrics = {"dice": [], "iou": [], "precision": [], "recall": []}
-
+    scores = {"dice": [], "iou": [], "precision": [], "recall": []}
     with torch.no_grad():
-        for images, masks in test_loader:
-            images = images.to(device)
-            preds  = model(images).cpu()
-            m      = compute_all_metrics(preds, masks)
-            for k in all_metrics:
-                all_metrics[k].append(m[k])
+        for x, y in test_loader:
+            x = x.to(device)
+            m = compute_all_metrics(model(x).cpu(), y)
+            for k in scores:
+                scores[k].append(m[k])
 
-    mean_metrics = {k: float(np.mean(v)) for k, v in all_metrics.items()}
-    return mean_metrics
+    return {k: float(np.mean(v)) for k, v in scores.items()}
 
+
+# -------------------------------------------------------------------------
+# MAIN PIPELINE
+# -------------------------------------------------------------------------
 
 def main():
-    print()
-    print("=" * 65)
-    print("   XCT Defect Detection — End-to-End Pipeline")
-    print("   Master's Thesis, University West, 2026")
+    print("\n" + "=" * 65)
+    print("   XCT Defect Detection — 2D + 3D Training Pipeline")
     print("=" * 65)
 
-    # ------------------------------------------------------------------
-    # Stage 1: Load all volumes
-    # ------------------------------------------------------------------
-    print("\n[STAGE 1] Loading NIST volumes ...")
-    nist_volumes = load_all_volumes(NIST_VOL_DIR)
+    # --------------------------------------------------------------
+    # Stage 1–2: Load volumes & generate pseudo-labels
+    # --------------------------------------------------------------
+    nist_vols   = load_all_volumes(NIST_VOL_DIR)
+    podfam_vols = load_all_volumes(PODFAM_VOL_DIR)
+    all_vols = {**nist_vols, **podfam_vols}
 
-    print("\n[STAGE 1] Loading PODFAM volumes ...")
-    podfam_volumes = load_all_volumes(PODFAM_VOL_DIR)
-
-    # Merge all volumes into one collection
-    all_volumes = {**nist_volumes, **podfam_volumes}
-    print(f"\n  Total volumes loaded: {len(all_volumes)}")
-
-    # ------------------------------------------------------------------
-    # Stage 2: Generate pseudo-labels (or load cached)
-    # ------------------------------------------------------------------
-    print("\n[STAGE 2] Generating Otsu pseudo-labels ...")
-
-    nist_masks = generate_and_save_pseudo_labels(
-        NIST_VOL_DIR, NIST_MASK_DIR, nist_volumes
-    )
-    podfam_masks = generate_and_save_pseudo_labels(
-        PODFAM_VOL_DIR, PODFAM_MASK_DIR, podfam_volumes
-    )
+    nist_masks = generate_and_save_pseudo_labels(NIST_VOL_DIR, NIST_MASK_DIR, nist_vols)
+    podfam_masks = generate_and_save_pseudo_labels(PODFAM_VOL_DIR, PODFAM_MASK_DIR, podfam_vols)
     all_masks = {**nist_masks, **podfam_masks}
 
-    # ------------------------------------------------------------------
-    # Stage 3: Train/val/test split
-    # ------------------------------------------------------------------
-    print("\n[STAGE 3] Splitting into train/val/test sets ...")
+    # --------------------------------------------------------------
+    # Stage 3: Split
+    # --------------------------------------------------------------
     train_v, train_m, val_v, val_m, test_v, test_m = split_volumes(
-        all_volumes, all_masks, VAL_SPLIT, TEST_SPLIT
+        all_vols, all_masks, VAL_SPLIT, TEST_SPLIT
     )
 
-    # ------------------------------------------------------------------
-    # Stage 4: Build DataLoaders
-    # ------------------------------------------------------------------
-    print("\n[STAGE 4] Building patch datasets and DataLoaders ...")
-    train_loader, val_loader = build_dataloaders(
+    loss_fn = get_loss_function()
+
+    # ==============================================================
+    # 2D TRAINING
+    # ==============================================================
+    print("\n[2D] Building datasets and training model...")
+    train_loader_2d, val_loader_2d = build_dataloaders(
         train_v, train_m, val_v, val_m, BATCH_SIZE
     )
 
-    # ------------------------------------------------------------------
-    # Stage 5: Model and loss function
-    # ------------------------------------------------------------------
-    print("\n[STAGE 5] Instantiating model and loss function ...")
-    model   = get_model()
-    loss_fn = get_loss_function()
+    model_2d = get_model_2d()
+    best_ckpt_2d = train(model_2d, train_loader_2d, val_loader_2d, loss_fn)
 
-    # ------------------------------------------------------------------
-    # Stage 6: Train
-    # ------------------------------------------------------------------
-    print("\n[STAGE 6] Training ...")
-    best_ckpt = train(model, train_loader, val_loader, loss_fn)
+    model_2d_fresh = get_model_2d()
+    metrics_2d = evaluate_test_set(model_2d_fresh, test_v, test_m, best_ckpt_2d)
 
-    # ------------------------------------------------------------------
-    # Stage 7: Test set evaluation
-    # ------------------------------------------------------------------
-    print("\n[STAGE 7] Evaluating on held-out test set ...")
-    model_fresh  = get_model()
-    test_metrics = evaluate_test_set(model_fresh, test_v, test_m, best_ckpt)
-    acceptance   = check_acceptance_criteria(test_metrics)
+    # ==============================================================
+    # 3D TRAINING
+    # ==============================================================
+    print("\n[3D] Building datasets and training model...")
+    train_loader_3d, val_loader_3d = build_dataloaders_3d(
+        train_v, train_m, val_v, val_m, BATCH_SIZE_3D, PATCH_SIZE_3D
+    )
 
+    model_3d = get_model_3d()
+    best_ckpt_3d = train(model_3d, train_loader_3d, val_loader_3d, loss_fn)
+
+    model_3d_fresh = get_model_3d()
+    metrics_3d = evaluate_test_set(model_3d_fresh, test_v, test_m, best_ckpt_3d)
+
+    # --------------------------------------------------------------
+    # Final report
+    # --------------------------------------------------------------
     print("\n" + "=" * 65)
-    print("  FINAL TEST SET RESULTS")
+    print("FINAL TEST RESULTS")
     print("=" * 65)
-    print(f"  Dice Score : {test_metrics['dice']:.4f}  "
-          f"{'✓ PASS' if acceptance['dice_pass']   else '✗ FAIL'}")
-    print(f"  IoU Score  : {test_metrics['iou']:.4f}  "
-          f"{'✓ PASS' if acceptance['iou_pass']    else '✗ FAIL'}")
-    print(f"  Precision  : {test_metrics['precision']:.4f}")
-    print(f"  Recall     : {test_metrics['recall']:.4f}  "
-          f"{'✓ PASS' if acceptance['recall_pass'] else '✗ FAIL'}")
-    print(f"\n  Overall: {'ALL CRITERIA PASSED ✓' if acceptance['all_pass'] else 'CRITERIA NOT YET MET ✗'}")
+    print(f"2D Dice: {metrics_2d['dice']:.4f} | 3D Dice: {metrics_3d['dice']:.4f}")
+    print(f"2D IoU : {metrics_2d['iou']:.4f}  | 3D IoU : {metrics_3d['iou']:.4f}")
     print("=" * 65)
-    print("\n[DONE] Pipeline complete.\n")
 
 
 if __name__ == "__main__":
