@@ -7,10 +7,6 @@ this module generates binary defect masks automatically using Otsu
 thresholding followed by morphological cleaning and connected component
 filtering.
 
-These pseudo-labels are imperfect but sufficient to train a U-Net that
-will generalise better than Otsu alone, as demonstrated in Yosifov (2020)
-and Bellens et al. (2021).
-
 Generated masks are saved as TIFF files alongside the volume data so they
 can be reused across training runs without regeneration.
 =============================================================================
