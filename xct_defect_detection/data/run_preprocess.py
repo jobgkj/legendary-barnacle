@@ -3,8 +3,6 @@
 run_preprocess.py — XCT Preprocessing Runner
 =============================================================================
 Run this from your repo root:
-    cd "C:\Users\Job George\Desktop\Degree Project\Code\podfam_research_project_XCT_Anlaysis"
-    python run_preprocess.py
 =============================================================================
 """
 
