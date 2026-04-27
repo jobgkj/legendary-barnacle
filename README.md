@@ -1,211 +1,188 @@
-# Automated XCT Defect Segmentation and Evaluation
+# XCT Defect Segmentation and Evaluation
+
 ## for Additively Manufactured Metal Parts
 
 ---
 
-## 🔬 Project Overview
+##  Project Overview
 
-This repository provides a **training, evaluation, and visualization framework** for deep learning–based
-segmentation of internal defects (pores, lack‑of‑fusion defects, cracks) in **industrial X‑ray Computed
-Tomography (XCT)** data of **additively manufactured (AM) metal components**.
+This document describes the complete processing, training, and evaluation
+workflow implemented in this repository for automated defect segmentation
+in industrial X-ray Computed Tomography (XCT) data of additively manufactured
+metal components.
 
-The work is conducted within the **PODFAM research initiative at University West** and focuses on
-**voxel‑level defect segmentation and validation**, enabling reliable and reproducible quality
-assessment of XCT volumes in metal additive manufacturing.
+The same data, preprocessing steps, and pseudo-labels are used to train
+both 2D and 3D U-Net models, enabling a fair and controlled comparison
+between slice-wise and volumetric learning.
 
-The repository supports:
-- **Model training (2D and 3D U‑Net)**
-- **Quantitative benchmarking**
-- **Volumetric visualization**
+---------------------------------------------------------------------
+STEP 1 — RAW XCT INPUT
+---------------------------------------------------------------------
 
-and is intended to serve as a **research backend for XCT defect analysis and method comparison**.
+Raw XCT data are provided as ordered TIFF slice stacks:
 
----
+data/tiff_stack/
+    slice_0000.tif
+    slice_0001.tif
+    slice_0002.tif
+    ...
 
-## 🚀 Key Features
+Slices must be named such that alphabetical ordering corresponds to
+the physical Z-order of the volume.
 
-- **Volumetric XCT Processing**  
-  Native handling of industrial XCT data represented as 3D TIFF image stacks.
+---------------------------------------------------------------------
+STEP 2 — XCT PREPROCESSING
+---------------------------------------------------------------------
 
-- **2D & 3D U‑Net Architectures**
-  - **2D U‑Net**: slice‑wise baseline for reviewer comparison
-  - **3D U‑Net**: patch‑based volumetric model exploiting full 3D context
+The raw TIFF stack is preprocessed using an XCT-specific pipeline
+designed for metal additive manufacturing data.
 
-- **Industrial XCT‑Specific Normalization**  
-  Percentile‑based intensity normalization to mitigate:
-  - Beam hardening
-  - Metal artifacts
-  - Scan‑to‑scan intensity variation
+Run:
+    python run_preprocess.py
 
-- **Training with Class‑Imbalance‑Aware Loss**  
-  Combined **Dice + Binary Cross‑Entropy (BCE)** loss to improve sensitivity to small defects.
+The preprocessing pipeline applies the following operations in sequence:
 
-- **Quantitative Evaluation Metrics**  
-  Automated voxel‑wise computation of:
-  - Dice Similarity Coefficient (DSC)
-  - Intersection over Union (IoU)
+1. Percentile-based intensity normalization
+   - Robust to metal artefacts and extreme outliers
 
-- **Interactive 3D Visualization**  
-  Volumetric surface rendering of:
-  - Ground‑truth defects
-  - Predicted defects
-  - True‑positive overlap regions
+2. Beam hardening correction
+   - Polynomial correction of systematic intensity gradients
 
----
+3. Ring artefact suppression
+   - Radial profile correction per slice
 
-## 🏗️ Architecture Description
+4. Non-local means denoising
+   - Noise suppression while preserving defect boundaries
 
-### 2D U‑Net (Baseline)
-A standard encoder–decoder U‑Net applied **slice‑by‑slice** to XCT volumes.  
-This baseline evaluates whether in‑plane context alone is sufficient for defect segmentation and serves
-as a **mandatory comparison baseline** in AM‑XCT literature.
+The output is a float32 volume normalized to the range [0, 1], saved
+slice-wise:
 
-### 3D U‑Net (Primary Model)
-A volumetric U‑Net trained and inferred using **overlapping 3D patches** extracted from XCT volumes.
-Patch‑based processing enables robust learning of:
-- Volumetric defect connectivity
-- Elongated lack‑of‑fusion defects
-- Irregular pore morphology
+data/tiff_output/
+    slice_0000.tif
+    slice_0001.tif
+    ...
 
-Both models use **Instance Normalization**, which is better suited than Batch Normalization for small
-batch sizes typical of XCT workflows.
+These preprocessed slices form the single shared input source for all
+subsequent stages.
 
----
+---------------------------------------------------------------------
+STEP 3 — PSEUDO-LABEL GENERATION (WEAK SUPERVISION)
+---------------------------------------------------------------------
 
-## 🧠 Training Strategy
+Since voxel-accurate ground truth annotations are typically unavailable,
+binary pseudo-label masks are generated automatically.
 
-### Data Sources
-Due to the limited availability of fully annotated public AM‑XCT datasets, training data are sourced from:
+The pseudo-label generation pipeline consists of:
 
-- **NIST Additive Manufacturing Metrology Testbed (AMMT) XCT datasets**
-  (e.g., Overhang Part X4 / X16)
-- **NIST high‑resolution LPBF XCT datasets with segmented volumes**
-- **In‑house Ti‑6Al‑4V XCT data (PODFAM project)**
+1. Global Otsu thresholding
+   - Defects correspond to low X-ray attenuation regions
 
-Voxel‑level defect labels are generated using **adaptive thresholding followed by expert correction**,
-which is consistent with standard practice in AM‑XCT studies.
+2. Morphological cleaning
+   - Opening removes isolated noise
+   - Closing fills small holes in defect regions
 
-### Training Setup
-- **2D U‑Net**: slice‑wise training
-- **3D U‑Net**: patch‑based volumetric training
-- **Loss**: Dice + Binary Cross‑Entropy
-- **Optimization**: Adam
-- **Evaluation**: Held‑out XCT volumes
+3. Connected-component filtering
+   - Removal of components smaller than a minimum voxel count
 
----
+Pseudo-labels are generated once and cached to disk:
 
-## 📁 Repository Structure
+    python data/pseudo_labels.py
 
-```bash
-xct_defect_detection/
-│
-├── config.py                  # All configuration in one place
-├── data/
-│   ├── loader.py              # TIFF stack loading
-│   ├── pseudo_labels.py       # Otsu pseudo-label generation
-│   ├── dataset.py             # PyTorch Dataset + patch extraction
-│   └── augmentation.py        # All augmentation transforms
-├── models/
-│   ├── unet2d.py              # 2D U-Net architecture
-│   └── unet3d.py              # 3D U-Net architecture
-├── training/
-│   ├── losses.py              # BCE, Dice, Focal, Combined losses
-│   ├── metrics.py             # Dice, IoU, Precision, Recall
-│   └── trainer.py             # Training loop + MLflow logging
-├── pipeline.py                # End-to-end pipeline (main entry point)
-└── requirements.txt
-```
+Resulting files:
 
-## 🛠️ Installation & Environment
+data/masks/
+    volume_01_mask.tif
+    volume_02_mask.tif
+    ...
 
-A CUDA‑enabled Python environment is recommended.
+These masks are weak supervision targets, but provide sufficient
+structural guidance to train U-Net models that generalize better
+than thresholding alone.
 
-```bash
-conda create -n podfam_env python=3.10
-conda activate podfam_env
-pip install -r requirements.txt
-```
----
-🧪 Training the Models
-Prepare local data:
-```bash
-dataset/
-dataset/
-├── volume/
-│   ├── slice_000.tif
-│   ├── slice_001.tif
-│   └── ...
-├── label/
-│   ├── slice_000.tif
-│   ├── slice_001.tif
-│   └── ...
-``
-```
-Run training:
+---------------------------------------------------------------------
+STEP 4 — DATASET CONSTRUCTION (SHARED FOR 2D AND 3D)
+---------------------------------------------------------------------
 
-```bash
-python industrial_ct_unet_training.py
-```
-This produces:
+The same preprocessed volumes and pseudo-label masks are used for both
+2D and 3D training. No preprocessing, normalization, or labeling differs
+between the models.
 
-dataset/model_2d.pth
-dataset/model_3d.pth
----
+Two dataset strategies are implemented:
 
-▶️ Evaluation & Visualization
+2D DATASET (SLICE-WISE)
+----------------------
+- Each XCT slice is treated independently
+- 2D patches are extracted using a sliding window
+- Foreground/background stratified sampling addresses severe class imbalance
+- Online 2D augmentation is applied during training
 
-```bash
-python industrial_ct_unet_2d_vs_3d_eval.py
-```
-Outputs
+This dataset is used to train the 2D U-Net baseline model.
 
-Dice Similarity Coefficient (DSC)
-Intersection over Union (IoU)
-Direct 2D vs 3D comparison
-Interactive 3D visualization
+3D DATASET (PATCH-WISE)
+----------------------
+- Random 3D patches (D, H, W) are extracted from the full volume
+- The same 2D augmentation is applied slice-wise within each 3D patch
+- No augmentation is applied across the Z dimension
 
----
-📊 Intended Use
+This approach preserves volumetric consistency while avoiding
+unphysical 3D warping.
 
-This repository is designed for:
+Both datasets use identical data and pseudo-labels, enabling a fair
+comparison between 2D and 3D learning approaches.
 
-Research benchmarking (2D vs 3D XCT segmentation)
-Development of new architectures (e.g., attention U‑Net, 2.5D models)
-Supporting PODFAM and related AM‑XCT research
+---------------------------------------------------------------------
+STEP 5 — MODEL TRAINING
+---------------------------------------------------------------------
 
-It is not intended as a production inspection system, but as a research and validation platform.
+2D U-NET TRAINING
+----------------
+- Slice-wise training
+- Input shape: (B, 1, H, W)
+- Inference is performed slice-by-slice and stacked into a 3D volume
 
----
-## 🎓 Acknowledgments & References
+3D U-NET TRAINING
+----------------
+- Patch-based volumetric training
+- Input shape: (B, 1, D, H, W)
+- Inference is performed using a sliding-window strategy
 
-This work is conducted within the PODFAM research initiative at University West, Sweden.
+Common training configuration:
+- Loss function: Dice + Binary Cross-Entropy
+- Optimizer: Adam or AdamW
+- Batch size: small (typically 1–4 due to GPU memory constraints)
 
-<a id="1">[1]</a>
-Ronneberger, O., Fischer, P., & Brox, T. (2015). 
-U‑Net: Convolutional Networks for Biomedical Image Segmentation. 
-Proceedings of MICCAI. https://doi.org/10.1007/978-3-319-24574-4_28
+Training commands:
+    python train_2d.py
+    python train_3d.py
 
-<a id="2">[2]</a> 
-Oktay, O., Schlemper, J., Folgoc, L. L., et al. (2018). 
-Attention U‑Net: Learning Where to Look for the Pancreas. 
-arXiv preprint. https://arxiv.org/abs/1804.03999
+Saved models:
+artifacts/
+    model_2d.pt
+    model_3d.pt
 
-<a id="3">[3]</a> 
-Bellens, S., Vandewalle, P., & Dewulf, W. (2021). 
-Deep Learning–Based Porosity Segmentation in X‑ray CT Measurements of Additive Manufacturing Parts. 
-Procedia CIRP, 96, 336–341. https://doi.org/10.1016/j.procir.2021.01.157
+---------------------------------------------------------------------
+STEP 6 — EVALUATION AND VISUALIZATION
+---------------------------------------------------------------------
 
-<a id="4">[4]</a> 
-Xu, C., Wang, F., Wei, G., et al. (2024). 
-High‑Performance Deep Learning Segmentation for Non‑Destructive Testing of X‑ray Tomography. 
-Journal of Manufacturing Processes, 128, 98–110. https://doi.org/10.1016/j.jmapro.2024.08.031
+Models are evaluated both quantitatively and qualitatively.
 
-<a id="5">[5]</a> 
-Praniewicz, M., Lane, B., Kim, F., & Saldana, C. (2020). 
-X‑ray Computed Tomography Data of Additive Manufacturing Metrology Testbed (AMMT) Parts: Overhang Part X4. 
-Journal of Research of NIST, 125. https://doi.org/10.6028/jres.125.031
+Quantitative metrics:
+- Dice Similarity Coefficient (DSC)
+- Intersection over Union (IoU)
 
----
+Qualitative analysis:
+- Slice-wise overlay visualization
+- Interactive 3D defect surface rendering
+
+Evaluation command:
+    python evaluate_2d_vs_3d.py
+
+This enables direct and reproducible comparison of slice-wise (2D)
+and volumetric (3D) defect segmentation performance.
+
+---------------------------------------------------------------------
+END OF PROCEDURE
+---------------------------------------------------------------------
 Author: Job George Konnoth Joseph
 
 Contact: job-george.konnoth-joseph@student.hv.se
