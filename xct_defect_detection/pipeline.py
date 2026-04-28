@@ -95,7 +95,7 @@ def split_volumes(volumes, masks, val_split, test_split):
 
 
 # -------------------------------------------------------------------------
-# Evaluation
+# Evaluation of Data
 # -------------------------------------------------------------------------
 def evaluate_test_set_2d(model, test_vols, test_masks, ckpt_path):
     device = torch.device(DEVICE if torch.cuda.is_available() else "cpu")
