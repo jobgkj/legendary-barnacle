@@ -10,7 +10,7 @@ Change values here only; do not hardcode elsewhere.
 import os
 
 # ---------------------------------------------------------------------------
-# Paths
+# Paths for Storag and Usage
 # ---------------------------------------------------------------------------
 NIST_VOL_DIR    = "data/nist/volumes"
 NIST_MASK_DIR   = "data/nist/masks"
