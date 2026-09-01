@@ -10,10 +10,15 @@ Run from repository root:
     python scripts/run_all_samples.py
 =============================================================================
 """
+import sys
+from pathlib import Path
 
-import warnings
+# Add project root to path so config.py can be found
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
+import warnings
+
 from config import create_dirs
 from src.io import load_and_generate_masks
 

@@ -24,10 +24,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
     DEVICE, LEARNING_RATE, WEIGHT_DECAY, NUM_EPOCHS,
     EARLY_STOP_PATIENCE, SCHEDULER_PATIENCE,
-    MLFLOW_EXPERIMENT, MLFLOW_URI, CKPT_DIR,
+    MLFLOW_EXPERIMENT, MLFLOW_URI, CKPT_DIR, EXPERIMENT_NAME,
     LOSS_FUNCTION, BATCH_SIZE, PATCH_SIZE,
     ENCODER_CHANNELS, DROPOUT_RATE,
-    FOCAL_ALPHA, FOCAL_GAMMA, DICE_FOCAL_LAMBDA
+    FOCAL_ALPHA, FOCAL_GAMMA, DICE_FOCAL_LAMBDA,
+    UNET_INPUT_SLICES,
 )
 from training.metrics import compute_all_metrics, check_acceptance_criteria
 
@@ -152,7 +153,7 @@ def train(
 
     best_dice       = 0.0
     patience_counter = 0
-    best_ckpt_path  = os.path.join(CKPT_DIR, "best_model.pt")
+    best_ckpt_path  = os.path.join(CKPT_DIR, f"best_model_{EXPERIMENT_NAME}.pt")
 
     mlflow.set_tracking_uri(MLFLOW_URI)
     mlflow.set_experiment(MLFLOW_EXPERIMENT)
@@ -160,7 +161,9 @@ def train(
     with mlflow.start_run():
 
         # Log all hyperparameters
+        mlflow.set_tag("experiment_name", EXPERIMENT_NAME)
         mlflow.log_params({
+            "experiment_name"  : EXPERIMENT_NAME,
             "loss_function"    : LOSS_FUNCTION,
             "learning_rate"    : LEARNING_RATE,
             "weight_decay"     : WEIGHT_DECAY,
@@ -169,6 +172,7 @@ def train(
             "patch_size"       : PATCH_SIZE,
             "encoder_channels" : str(ENCODER_CHANNELS),
             "dropout_rate"     : DROPOUT_RATE,
+            "unet_input_slices": UNET_INPUT_SLICES,
             "focal_alpha"      : FOCAL_ALPHA,
             "focal_gamma"      : FOCAL_GAMMA,
             "dice_focal_lambda": DICE_FOCAL_LAMBDA,

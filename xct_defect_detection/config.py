@@ -7,6 +7,7 @@ Change values here only; do not hardcode elsewhere.
 =============================================================================
 """
 
+import os
 from pathlib import Path
 
 # =============================================================================
@@ -29,12 +30,57 @@ SAMPLE_NAMES = sorted([
 ]) if (REPO_ROOT / "data" / "raw").exists() else []
 
 # =============================================================================
+# Training data selection — the two knobs to turn when you want to
+# change what pipeline.py trains on and run it again later
+# =============================================================================
+#
+# By default (TRAINING_SAMPLES_OVERRIDE = None), pipeline.py auto-ranks
+# every discovered sample by defect (void) content and keeps the top
+# MAX_TRAINING_SAMPLES most defect-rich ones — training on near-empty
+# samples wastes most of every patch on background, and this also
+# guards against known-bad samples (see SUSPICIOUS_DEFECT_FRACTION in
+# pipeline.py). Needs at least 3 samples for a train/val/test split.
+#
+# To force a *specific* set of samples instead of auto-ranking — the
+# fastest way to try a different data mix without touching any other
+# code — set TRAINING_SAMPLES_OVERRIDE to an explicit list, most-voids-
+# first (the first entries become train, the last become val/test; see
+# pipeline.py::split_volumes):
+#
+#     TRAINING_SAMPLES_OVERRIDE = ["sample_02", "sample_04", "sample_03"]
+#
+# Every time you change either knob, also bump EXPERIMENT_NAME below —
+# that keeps this run's checkpoint and prediction outputs from
+# overwriting a previous run's, so you can compare them side by side
+# later instead of only ever having "the latest" result.
+TRAINING_SAMPLES_OVERRIDE = ["sample_02", "sample_04", "sample_03", "sample_01"]
+MAX_TRAINING_SAMPLES      = 6
+
+# Identifies one training configuration. Used to name the saved
+# checkpoint (artifacts/best_model_<EXPERIMENT_NAME>.pt) and to
+# namespace scripts/predict_and_visualize_3d.py's output folders/files
+# — change this whenever you change TRAINING_SAMPLES_OVERRIDE or
+# MAX_TRAINING_SAMPLES so old and new results don't collide.
+#
+# Loss-function ablation (RQ4): TRAINING_SAMPLES_OVERRIDE is pinned to
+# the exact same 4 samples as the "top6_by_voids" (dice_focal) run so
+# these experiments are a controlled comparison — only LOSS_FUNCTION
+# (below) differs between them.
+EXPERIMENT_NAME = os.environ.get("XCT_EXPERIMENT_NAME", "loss_focal")
+
+# Skip the 3D U-Net training stage in pipeline.py — 2D-only for now.
+SKIP_3D_TRAINING = True
+
+# =============================================================================
 # Data directories
 # =============================================================================
 
 RAW_DATA_DIR       = REPO_ROOT / "data" / "raw"
-PROCESSED_DATA_DIR = REPO_ROOT / "data" / "processed"
-MASKS_DIR          = REPO_ROOT / "data" / "masks"
+# XCT_PROCESSED_DIR / XCT_MASKS_DIR let a run point at an alternate
+# preprocessed-data tree (e.g. data/processed_bhc_ring) without changing
+# the defaults every other script in this repo relies on.
+PROCESSED_DATA_DIR = Path(os.environ.get("XCT_PROCESSED_DIR", str(REPO_ROOT / "data" / "processed")))
+MASKS_DIR          = Path(os.environ.get("XCT_MASKS_DIR", str(REPO_ROOT / "data" / "masks")))
 
 # =============================================================================
 # Results directories
@@ -43,6 +89,7 @@ MASKS_DIR          = REPO_ROOT / "data" / "masks"
 CKPT_DIR    = REPO_ROOT / "artifacts"
 FIGURES_DIR = REPO_ROOT / "results" / "figures"
 METRICS_DIR = REPO_ROOT / "results" / "metrics"
+CACHE_DIR   = REPO_ROOT / "data" / "cache"
 
 # =============================================================================
 # Directory creation — call explicitly at pipeline startup
@@ -60,6 +107,7 @@ def create_dirs() -> None:
         CKPT_DIR,
         FIGURES_DIR,
         METRICS_DIR,
+        CACHE_DIR,
     ]:
         d.mkdir(parents=True, exist_ok=True)
 
@@ -70,6 +118,20 @@ def create_dirs() -> None:
 NORM_LOW_PERCENTILE  = 1
 NORM_HIGH_PERCENTILE = 99
 NORM_EPS             = 1e-7
+
+# Number of evenly-spaced raw slices sampled to estimate a STACK-WIDE
+# (p1, p99) normalisation range, instead of each slice computing its
+# own range independently. Per-slice normalisation stretches whatever
+# raw intensity spread that one slice happens to have to fill the full
+# output range — fine for a well-illuminated slice, but for a thin- or
+# low-density-cross-section slice (e.g. near the top/bottom of a scan,
+# where material tapers off) it takes a genuinely low-contrast signal
+# and force-stretches it to look like full-strength contrast, which
+# Bernsen then reads as spurious defect boundaries. A shared stack-wide
+# range keeps a genuinely low-signal slice looking low-signal relative
+# to the rest of the stack, rather than artificially equalised to
+# match the well-illuminated middle.
+STACK_NORM_N_SAMPLE_SLICES = 20
 
 MEDIAN_KERNEL_SIZE   = 3
 
@@ -86,7 +148,36 @@ RING_FILTER_RADIUS   = 15
 # =============================================================================
 
 BERNSEN_RADIUS              = 5      # local window radius in pixels (Kim et al. 2017)
-BERNSEN_LOW_CONTRAST_THRESH = 128    # fixed threshold for low-contrast regions
+BERNSEN_LOW_CONTRAST_THRESH = 128    # fixed fallback — only used when BERNSEN_LOW_CONTRAST_ADAPTIVE = False
+
+# ------------------------------------------------------------------
+# Adaptive low-contrast fallback threshold
+# ------------------------------------------------------------------
+# BERNSEN_LOW_CONTRAST_THRESH (128) is a single value assumed to work
+# across every sample's brightness range. In practice DCT (below) comes
+# out far higher than Kim et al.'s reported ~15 across every sample
+# measured so far — which routes almost every pixel through this
+# fallback rather than genuine local adaptive thresholding — and 128
+# only happens to be a reasonable split point for brighter-averaging
+# samples. Darker-averaging samples (median well under 128) have most
+# of their genuinely solid material misclassified as pore: measured
+# directly, samples with median intensity ~35-73 showed 50%+ "defect"
+# fraction from this alone, even after sample-mask background removal.
+#
+# When True, the fallback threshold is instead computed per image via
+# Otsu's method restricted to the pixels inside the sample mask (or the
+# whole image if no mask is given) — adapting to each sample's own
+# brightness distribution instead of assuming one global constant fits
+# every scan.
+#
+# Measured directly and left OFF by default: Otsu is biased when one
+# class vastly outnumbers the other (exactly the solid-vs-pore case
+# here — the same failure mode already documented for Otsu as a
+# standalone method above), and it measurably regressed samples that
+# were already fine under the fixed threshold — e.g. a near-zero-
+# porosity sample went from ~0% to ~20% "defect" fraction. Left in the
+# code as an option, not because it currently gives good results.
+BERNSEN_LOW_CONTRAST_ADAPTIVE = False
 
 # ------------------------------------------------------------------
 # Auto-DCT computation (Kim et al. 2017 method)
@@ -134,6 +225,23 @@ PATCH_STRIDE  = 128
 FG_BG_RATIO   = (1, 3)
 MIN_FG_PIXELS = 10
 
+# 2.5D input: number of adjacent slices stacked as input channels around
+# the centre slice, giving the 2D U-Net some volumetric context without
+# the memory/compute cost of true 3D convolutions (see SKIP_3D_TRAINING
+# above). Must be odd — the model still predicts a mask for the centre
+# slice only; its (N//2) neighbours above and below are extra context
+# channels. Neighbours past a volume's edge are clamped (edge slice
+# repeated) rather than zero-padded. Set to 1 to fall back to the
+# original single-slice 2D behaviour.
+UNET_INPUT_SLICES = 3
+
+# Evenly-spaced slices sampled per volume for the 2D dataset, instead of
+# scanning every slice. Full volumes run ~900 slices each; with the low
+# RAM ceiling on this machine (see data/dataset.py's slice cache), an
+# exhaustive scan makes each epoch take 3+ hours. Sampling keeps epoch
+# time practical at the cost of not seeing every slice each epoch.
+TRAIN_SLICES_PER_VOLUME = 80
+
 # =============================================================================
 # Patch extraction (3D)
 # =============================================================================
@@ -174,6 +282,8 @@ DEVICE        = "cuda"   # or "cpu"
 
 BATCH_SIZE_2D = 8
 BATCH_SIZE_3D = 1
+BATCH_SIZE    = BATCH_SIZE_2D   # logged to MLflow only — actual batch size
+                                 # for each stage is BATCH_SIZE_2D / BATCH_SIZE_3D
 
 NUM_EPOCHS    = 50
 LEARNING_RATE = 4e-5
@@ -182,7 +292,7 @@ WEIGHT_DECAY  = 1e-5
 VAL_SPLIT     = 0.2
 TEST_SPLIT    = 0.1
 
-LOSS_FUNCTION      = "dice_focal"   # "bce", "dice", "focal", "dice_focal"
+LOSS_FUNCTION      = os.environ.get("XCT_LOSS_FUNCTION", "focal")   # "bce", "dice", "focal", "dice_focal"
 DICE_FOCAL_LAMBDA  = 0.5
 FOCAL_ALPHA        = 0.25
 FOCAL_GAMMA        = 2.0
@@ -204,10 +314,38 @@ ACCEPTANCE_REC  = 0.80
 # =============================================================================
 
 MLFLOW_EXPERIMENT = "XCT_Defect_Detection"
+MLFLOW_URI        = (REPO_ROOT / "mlruns").as_uri()
 # config.py
 
-# Number of pixels to erode from the detected boundary
-SAMPLE_MASK_EROSION_RADIUS = 5   # adjust based on your dataset
+# Enable or disable sample mask detection
+USE_SAMPLE_MASK = True   # set to False if you want to skip masking
+
+# Number of pixels to erode from the detected boundary. Partial-volume
+# edge pixels (a mix of air and metal intensity right at the sample
+# surface) are unreliable for thresholding and read as spurious dark
+# "pore-like" pixels if left in; raised from 5 -> 8 for a larger safety
+# margin, after measured background leakage of 40-45 percentage points
+# (e.g. 56% unmasked -> 9-13% masked) on the lower-coverage samples.
+SAMPLE_MASK_EROSION_RADIUS = 8   # adjust based on your dataset
 
 # Intensity threshold to classify air vs. sample
 SAMPLE_MASK_AIR_THRESHOLD = 30   # typical range: 20–50 for uint8 XCT slices
+
+# ------------------------------------------------------------------
+# Empty-slice detection (top/bottom of a TIFF stack)
+# ------------------------------------------------------------------
+# The stack-level sample mask (detect_sample_mask_stack) is fit from
+# slices in the CENTRE half of the stack only, then the same circle is
+# reused for every slice, including ones near the top/bottom of the
+# scan where the physical part hasn't started yet or has already ended
+# — those slices are just air/noise inside that circle. Running
+# thresholding on them anyway misclassifies the whole circular region
+# as one large "pore", which shows up in a 3D reconstruction as flat,
+# over-segmented discs at the top and bottom of the stack.
+#
+# Before thresholding each slice, the fraction of sample-mask pixels
+# that are actually bright/solid (> SAMPLE_MASK_AIR_THRESHOLD) is
+# checked; below this fraction, the slice is treated as containing no
+# real object and its masks are written as all-zero (no defects — an
+# empty slice cannot contain a defect) instead of being thresholded.
+EMPTY_SLICE_MIN_OBJECT_FRACTION = 0.05

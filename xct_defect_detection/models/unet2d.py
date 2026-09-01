@@ -1,10 +1,19 @@
 """
 =============================================================================
-2D U-Net Architecture
+2.5D U-Net Architecture
 =============================================================================
 Standard encoder-decoder U-Net (Ronneberger et al., 2015) with configurable
 encoder depth, batch normalisation, dropout in the bottleneck, and sigmoid
 output for binary defect/background segmentation.
+
+"2.5D": the network is still built entirely from 2D convolutions (cheap,
+same as a plain 2D U-Net), but each input carries UNET_INPUT_SLICES
+adjacent XCT slices stacked as input channels instead of a single slice.
+That gives the model some volumetric (through-slice) context — without
+the memory/compute cost of true 3D convolutions — while it still predicts
+a 2D mask for just the centre slice of that stack. See config.py's
+UNET_INPUT_SLICES and data/dataset.py::XCTPatchDataset._get_slice_stack
+for how the stack is assembled.
 =============================================================================
 """
 
@@ -12,7 +21,7 @@ import torch
 import torch.nn as nn
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import ENCODER_CHANNELS, DROPOUT_RATE
+from config import ENCODER_CHANNELS, DROPOUT_RATE, UNET_INPUT_SLICES
 
 
 class ConvBlock(nn.Module):
@@ -111,17 +120,22 @@ class DecoderBlock(nn.Module):
 
 class UNet2D(nn.Module):
     """
-    2D U-Net for binary defect segmentation in XCT slices.
+    2.5D U-Net for binary defect segmentation in XCT slices.
 
     Architecture follows Ronneberger et al. (2015) with configurable
-    encoder depth and dropout regularisation in the bottleneck.
+    encoder depth and dropout regularisation in the bottleneck. Every
+    conv is a plain 2D convolution — "2.5D" refers only to the input,
+    which stacks several adjacent slices as channels (see module
+    docstring); the network itself never sees a depth axis.
 
-    Input:  (B, 1, H, W)  — single-channel greyscale XCT patch
-    Output: (B, 1, H, W)  — per-pixel defect probability in [0, 1]
+    Input:  (B, UNET_INPUT_SLICES, H, W)  — stacked adjacent XCT slices
+    Output: (B, 1, H, W)  — per-pixel defect probability in [0, 1],
+                            for the centre slice of the input stack only
 
     Parameters
     ----------
-    in_channels      : int   — input channels (1 for greyscale XCT)
+    in_channels      : int   — input channels (defaults to config.UNET_INPUT_SLICES;
+                                pass 1 for the original single-slice 2D behaviour)
     out_channels     : int   — output channels (1 for binary segmentation)
     encoder_channels : list  — feature channels at each encoder depth
     dropout_rate     : float — dropout probability in bottleneck
@@ -129,13 +143,14 @@ class UNet2D(nn.Module):
 
     def __init__(
         self,
-        in_channels      : int   = 1,
+        in_channels      : int   = None,
         out_channels     : int   = 1,
         encoder_channels : list  = None,
         dropout_rate     : float = None
     ):
         super().__init__()
 
+        in_channels  = in_channels      or UNET_INPUT_SLICES
         channels     = encoder_channels or ENCODER_CHANNELS
         dropout_rate = dropout_rate     or DROPOUT_RATE
 
@@ -171,11 +186,12 @@ class UNet2D(nn.Module):
 
         Parameters
         ----------
-        x : torch.Tensor  — (B, 1, H, W)
+        x : torch.Tensor  — (B, UNET_INPUT_SLICES, H, W)
 
         Returns
         -------
-        torch.Tensor  — (B, 1, H, W), values in [0, 1]
+        torch.Tensor  — (B, 1, H, W), values in [0, 1] — mask for the
+                         centre slice of the input stack
         """
         skips = []
 
@@ -195,13 +211,14 @@ class UNet2D(nn.Module):
 
 
 def get_model() -> UNet2D:
-    """Instantiate and return a 2D U-Net with config defaults."""
+    """Instantiate and return a 2.5D U-Net with config defaults."""
     model = UNet2D(
-        in_channels      = 1,
+        in_channels      = UNET_INPUT_SLICES,
         out_channels     = 1,
         encoder_channels = ENCODER_CHANNELS,
         dropout_rate     = DROPOUT_RATE
     )
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"  [Model] 2D U-Net — trainable parameters: {n_params:,}")
+    print(f"  [Model] 2.5D U-Net (input slices={UNET_INPUT_SLICES}) — "
+          f"trainable parameters: {n_params:,}")
     return model

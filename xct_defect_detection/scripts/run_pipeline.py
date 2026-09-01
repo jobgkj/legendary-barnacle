@@ -15,7 +15,11 @@ Run from repository root:
     python scripts/run_pipeline.py
 =============================================================================
 """
+import sys
+from pathlib import Path
 
+# Add project root to path so config.py can be found
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import warnings
 import csv
 from pathlib import Path

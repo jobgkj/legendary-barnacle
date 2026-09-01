@@ -138,7 +138,8 @@ def load_subvolume(sample_name: str) -> tuple:
         if raw.ndim != 2:
             continue
         prep = preprocess_slice(raw)
-        mask = bernsen(prep)
+        body_mask = get_body_mask(prep)
+        mask = (bernsen(prep) & body_mask).astype(np.uint8)
         prep_slices.append(prep.astype(np.float32) / 255.0)
         mask_slices.append(mask.astype(np.float32))
 
@@ -147,7 +148,37 @@ def load_subvolume(sample_name: str) -> tuple:
 
     return np.stack(prep_slices, axis=0), np.stack(mask_slices, axis=0)
 
+def load_full_volume(sample_name: str) -> tuple:
+    """
+    Load ALL slices for a sample.
+    Returns (prep_volume, mask_volume) as float32 arrays (N, H, W).
+    Body-gated Bernsen mask applied per slice.
+    """
+    raw_dir = config.RAW_DATA_DIR / sample_name
+    tiff_files = sorted(
+        list(raw_dir.glob("*.tif")) + list(raw_dir.glob("*.tiff"))
+    )
+    if not tiff_files:
+        raise ValueError(f"No TIFF files in {raw_dir}")
 
+    prep_slices, mask_slices = [], []
+
+    for i, f in enumerate(tiff_files):
+        raw = tiff.imread(f).astype(np.float32)
+        if raw.ndim != 2:
+            continue
+        prep      = preprocess_slice(raw)
+        body_mask = get_body_mask(prep)
+        mask      = (bernsen(prep) & body_mask).astype(np.uint8)
+        prep_slices.append(prep.astype(np.float32) / 255.0)
+        mask_slices.append(mask.astype(np.float32))
+        if (i + 1) % 20 == 0:
+            print(f"        Loaded {i+1}/{len(tiff_files)} slices...")
+
+    if not prep_slices:
+        raise ValueError(f"No valid 2D slices for {sample_name}")
+
+    return np.stack(prep_slices, axis=0), np.stack(mask_slices, axis=0)
 # =============================================================================
 # Preprocessing helpers
 # =============================================================================
@@ -191,7 +222,40 @@ def apply_augmentation(img: np.ndarray, mask: np.ndarray):
         img, mask = np.rot90(img, k), np.rot90(mask, k)
     return img.copy(), mask.copy()
 
+def get_body_mask(slc: np.ndarray) -> np.ndarray:
+    """
+    Returns a binary mask of the sample body interior.
+    Finds the largest connected solid region, fills all holes inside it,
+    then erodes slightly to remove surface artifacts.
+    Background outside the sample is excluded.
+    """
+    from scipy.ndimage import binary_fill_holes, label as nd_label
+    from skimage.filters import threshold_otsu
+    from skimage.morphology import binary_erosion, disk
 
+    s = slc.astype(np.float32)
+    if s.max() > 1.0:
+        s = s / 255.0
+
+    # Solid material = bright region above Otsu threshold
+    thresh = threshold_otsu(s)
+    binary = s > thresh
+
+    # Keep only the largest connected component (the body, not noise)
+    labeled, n = nd_label(binary)
+    if n == 0:
+        return np.ones(slc.shape, dtype=np.uint8)
+    sizes = np.bincount(labeled.ravel())
+    sizes[0] = 0  # ignore background label
+    body = (labeled == np.argmax(sizes))
+
+    # Fill holes → interior of body now included
+    body_filled = binary_fill_holes(body)
+
+    # Erode 3px to avoid classifying surface voxels as pores
+    body_interior = binary_erosion(body_filled, disk(3))
+
+    return body_interior.astype(np.uint8)
 # =============================================================================
 # TASK 1 — Preprocessing
 # =============================================================================
@@ -289,10 +353,11 @@ def task1(sample_name: str, raw: np.ndarray, mid_slice: str) -> dict:
 
 def task2(sample_name: str, preprocessed: np.ndarray,
           mid_slice: str) -> dict:
+    body_mask = get_body_mask(preprocessed)
     masks = {
-        "otsu":    otsu(preprocessed),
-        "yen":     yen(preprocessed),
-        "bernsen": bernsen(preprocessed),
+        "otsu":    (otsu(preprocessed)    & body_mask).astype(np.uint8),
+        "yen":     (yen(preprocessed)     & body_mask).astype(np.uint8),
+        "bernsen": (bernsen(preprocessed) & body_mask).astype(np.uint8),
     }
     pore_fracs = {
         m: float(np.sum(mask == 1)) / mask.size
@@ -432,8 +497,8 @@ def task3(sample_name: str, masks: dict, mid_slice: str) -> dict:
 def task4(sample_name: str, preprocessed: np.ndarray,
           mid_slice: str) -> dict:
     slc  = preprocessed.astype(np.float32) / 255.0
-    mask = bernsen(preprocessed)
-
+    body_mask = get_body_mask(preprocessed)
+    mask = (bernsen(preprocessed) & body_mask).astype(np.uint8)
     patch_counts = {}
 
     for patch_size in [64, 128]:
@@ -537,110 +602,339 @@ def task4(sample_name: str, preprocessed: np.ndarray,
 # =============================================================================
 # TASK 5 — 3D Visualisation
 # =============================================================================
-
 def task5(sample_name: str):
+    """
+    3D Visualisation: Generates a solid 3D render and refined scatter plot.
+    Uses morphological filtering to ensure defects are strictly internal.
+    """
+    # CORRECTED IMPORTS
+    from scipy.ndimage import binary_fill_holes, gaussian_filter
+    from skimage.morphology import binary_erosion, ball
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from skimage.measure import marching_cubes
+    from skimage.filters import threshold_otsu
 
-    print(f"      Loading {N_SLICES_3D}-slice sub-volume ...")
-    prep_vol, mask_vol = load_subvolume(sample_name)
-    print(f"      Volume shape: {prep_vol.shape}")
+    # 1. Initialize variables to prevent "local variable not associated" errors
+    prep_vol = None
+    mask_vol = None
 
-    # ── Surface render ───────────────────────────────────────────────────────
-    smoothed = gaussian_filter(prep_vol, sigma=0.8)
-    thresh   = threshold_otsu(smoothed)
+    print(f"      [Task 5] Processing 3D Volume for {sample_name}...")
+    
     try:
-        verts, faces, _, _ = marching_cubes(smoothed, level=thresh)
-        fig = plt.figure(figsize=(9, 7), facecolor="#0d0d0d")
-        ax  = fig.add_subplot(111, projection="3d")
-        ax.set_facecolor("#0d0d0d")
-        ax.plot_trisurf(verts[:, 0], verts[:, 1], verts[:, 2],
-                        triangles=faces, color="#aaaaaa",
-                        alpha=0.3, linewidth=0)
-        ax.set_title(f"Air–Solid Surface — {sample_name}",
-                     color="white", fontsize=11)
-        ax.set_xlabel("Z", color="white", fontsize=8)
-        ax.set_ylabel("Y", color="white", fontsize=8)
-        ax.set_zlabel("X", color="white", fontsize=8)
-        ax.tick_params(colors="white", labelsize=7)
-        for pane in [ax.xaxis.pane, ax.yaxis.pane, ax.zaxis.pane]:
-            pane.fill = False
-            pane.set_edgecolor("#333333")
-        plt.tight_layout()
-        save_fig(fig, 5, f"{sample_name}_surface_render.png")
+        # Load the sub-volume first
+        prep_vol, mask_vol = load_subvolume(sample_name)
     except Exception as e:
-        warnings.warn(f"Surface render failed for {sample_name}: {e}")
+        print(f"      [Error] Could not load volume: {e}")
+        return
 
-    # ── Defect scatter ───────────────────────────────────────────────────────
-    pz, py, px = np.where(mask_vol == 1)
+    if prep_vol is None or mask_vol is None:
+        print(f"      [Error] Volume data is empty for {sample_name}")
+        return
+
+    # 2. CREATE THE METAL ENVELOPE (The "Container")
+    try:
+        # Step A: Find the solid part using a strict threshold (1.1x Otsu)
+        metal_threshold = threshold_otsu(prep_vol) * 1.1
+        metal_envelope = prep_vol > metal_threshold
+        
+        # Step B: Fill internal holes so pores are considered "inside"
+        for i in range(metal_envelope.shape[0]):
+            metal_envelope[i] = binary_fill_holes(metal_envelope[i])
+            
+        # Step C: Erode the envelope to remove surface noise (2-pixel buffer)
+        metal_envelope = binary_erosion(metal_envelope, ball(2))
+            
+        # Step D: Apply the Gate
+        refined_mask = (mask_vol == 1) & (metal_envelope == True)
+        
+    except Exception as e:
+        print(f"      [Warning] Spatial gating failed, using raw masks: {e}")
+        refined_mask = mask_vol == 1
+
+    # 3. GENERATE SOLID 3D VISUALIZATION
+    fig = plt.figure(figsize=(12, 10), facecolor="#0d0d0d")
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_facecolor("#0d0d0d")
+
+    try:
+        # A. Internal Defects (Solid Red)
+        if np.any(refined_mask):
+            # Use SciPy gaussian_filter for smoothing
+            smoothed_pores = gaussian_filter(refined_mask.astype(np.float32), sigma=0.5)
+            v_p, f_p, _, _ = marching_cubes(smoothed_pores, level=0.5)
+            ax.plot_trisurf(v_p[:, 0], v_p[:, 1], v_p[:, 2],
+                            triangles=f_p, color="#ff4444", 
+                            alpha=0.9, linewidth=0, antialiased=True)
+            print(f"      [Success] Rendered solid internal defects.")
+
+        # B. Metal Shell (Transparent Ghost)
+        # Use downsampling [::2] to save memory
+        smoothed_solid = gaussian_filter(prep_vol, sigma=0.8)
+        v_s, f_s, _, _ = marching_cubes(smoothed_solid[::2, ::2, ::2], 
+                                        level=threshold_otsu(smoothed_solid))
+        
+        # Multiply vertices by 2 to compensate for the [::2] downsampling
+        ax.plot_trisurf(v_s[:, 0]*2, v_s[:, 1]*2, v_s[:, 2]*2,
+                        triangles=f_s, color="#cccccc", 
+                        alpha=0.10, linewidth=0) 
+        
+    except Exception as e:
+        print(f"      [Error] 3D mesh generation failed: {e}")
+
+    ax.set_title(f"3D Solid Defect Volume — {sample_name}", color="white", pad=20)
+    dark_ax(ax)
+    plt.tight_layout()
+    save_fig(fig, 5, f"{sample_name}_solid_3d_render.png")
+
+    # 4. REFINED DEFECT SCATTER
+    pz, py, px = np.where(refined_mask)
     if len(pz) > 0:
         if len(pz) > MAX_POINTS:
             np.random.seed(RANDOM_SEED)
-            idx    = np.random.choice(len(pz), MAX_POINTS, replace=False)
+            idx = np.random.choice(len(pz), MAX_POINTS, replace=False)
             pz, py, px = pz[idx], py[idx], px[idx]
-        fig = plt.figure(figsize=(9, 7), facecolor="#0d0d0d")
-        ax  = fig.add_subplot(111, projection="3d")
-        ax.set_facecolor("#0d0d0d")
-        sc  = ax.scatter(px, py, pz, c=pz, cmap="Reds", s=1, alpha=0.6)
-        cbar = plt.colorbar(sc, ax=ax, pad=0.1, shrink=0.6)
-        cbar.set_label("Slice (Z)", color="white", fontsize=8)
-        plt.setp(cbar.ax.yaxis.get_ticklabels(), color="white")
-        ax.set_title(f"Pore Scatter — {sample_name}\n{len(pz):,} voxels",
-                     color="white", fontsize=11)
-        ax.set_xlabel("X", color="white", fontsize=8)
-        ax.set_ylabel("Y", color="white", fontsize=8)
-        ax.set_zlabel("Z", color="white", fontsize=8)
-        ax.tick_params(colors="white", labelsize=7)
-        for pane in [ax.xaxis.pane, ax.yaxis.pane, ax.zaxis.pane]:
-            pane.fill = False
-            pane.set_edgecolor("#333333")
-        plt.tight_layout()
-        save_fig(fig, 5, f"{sample_name}_defect_scatter.png")
 
-    # ── Orthographic projections ─────────────────────────────────────────────
-    proj_xy = prep_vol.max(axis=0)
-    proj_xz = prep_vol.max(axis=1)
-    proj_yz = prep_vol.max(axis=2)
-    mask_xy = mask_vol.sum(axis=0)
-    mask_xz = mask_vol.sum(axis=1)
-    mask_yz = mask_vol.sum(axis=2)
+        fig_sc = plt.figure(figsize=(9, 7), facecolor="#0d0d0d")
+        ax_sc = fig_sc.add_subplot(111, projection="3d")
+        ax_sc.set_facecolor("#0d0d0d")
+        
+        sc = ax_sc.scatter(px, py, pz, c=pz, cmap="Reds", s=1, alpha=0.6)
+        ax_sc.set_title(f"Pore Scatter (Internal Only) — {sample_name}", color="white")
+        dark_ax(ax_sc)
+        save_fig(fig_sc, 5, f"{sample_name}_defect_scatter.png")
 
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10), facecolor="#0d0d0d")
-    fig.suptitle(f"Orthographic Projections — {sample_name}",
-                 color="white", fontsize=13, y=1.01)
-    for col, (view, mask_, label) in enumerate(zip(
-        [proj_xy, proj_xz, proj_yz],
-        [mask_xy, mask_xz, mask_yz],
-        ["XY (Top)", "XZ (Front)", "YZ (Side)"]
-    )):
-        axes[0, col].imshow(view,  cmap="gray")
-        axes[0, col].set_title(f"{label} — MIP",   color="white", fontsize=10)
+    # 5. ORTHOGRAPHIC PROJECTIONS (MIP)
+    fig_op, axes = plt.subplots(2, 3, figsize=(15, 10), facecolor="#0d0d0d")
+    views = [prep_vol.max(axis=0), prep_vol.max(axis=1), prep_vol.max(axis=2)]
+    m_views = [refined_mask.sum(axis=0), refined_mask.sum(axis=1), refined_mask.sum(axis=2)]
+    labels = ["XY (Top)", "XZ (Front)", "YZ (Side)"]
+
+    for col in range(3):
+        axes[0, col].imshow(views[col], cmap="gray")
+        axes[0, col].set_title(f"{labels[col]} — MIP", color="white", fontsize=10)
         axes[0, col].axis("off")
-        axes[1, col].imshow(mask_, cmap="hot")
-        axes[1, col].set_title(f"{label} — Pores", color="white", fontsize=10)
+        
+        axes[1, col].imshow(m_views[col], cmap="hot")
+        axes[1, col].set_title(f"{labels[col]} — Internal Pores", color="white", fontsize=10)
         axes[1, col].axis("off")
+        
     plt.tight_layout()
-    save_fig(fig, 5, f"{sample_name}_orthographic_projections.png")
+    save_fig(fig_op, 5, f"{sample_name}_orthographic_projections.png")
 
-    # ── Slice mosaic ─────────────────────────────────────────────────────────
-    n      = prep_vol.shape[0]
+    # 6. SLICE MOSAIC
+    n = prep_vol.shape[0]
     n_cols = min(n, 5)
     n_rows = (n + n_cols - 1) // n_cols
-
-    fig, axes = plt.subplots(n_rows, n_cols,
-                              figsize=(4*n_cols, 4*n_rows),
-                              facecolor="#0d0d0d")
+    fig_mo, axes = plt.subplots(n_rows, n_cols, figsize=(4*n_cols, 4*n_rows), facecolor="#0d0d0d")
     axes = np.array(axes).reshape(n_rows, n_cols)
-    fig.suptitle(f"Slice Mosaic — {sample_name} ({n} slices)",
-                 color="white", fontsize=13, y=1.01)
+    
     for i in range(n_rows * n_cols):
         row, col = divmod(i, n_cols)
         ax = axes[row, col]
         if i < n:
             ax.imshow(prep_vol[i], cmap="gray", vmin=0, vmax=1)
-            ax.imshow(mask_vol[i], cmap="Reds",  alpha=0.35, vmin=0, vmax=1)
+            ax.imshow(refined_mask[i], cmap="Reds", alpha=0.35)
             ax.set_title(f"Slice {i}", color="#aaaaaa", fontsize=8)
         ax.axis("off")
     plt.tight_layout()
-    save_fig(fig, 5, f"{sample_name}_slice_mosaic.png")
+    save_fig(fig_mo, 5, f"{sample_name}_slice_mosaic.png")
+
+# =============================================================================
+# TASK 6 — Full 3D Defect Volume
+# =============================================================================
+
+def task6(sample_name: str):
+    """
+    Loads ALL slices from a sample and renders the complete 3D defect volume:
+      - Solid mesh (marching cubes) with ghost shell
+      - Defect scatter coloured by depth
+      - Orthographic MIPs (XY / XZ / YZ)
+      - Slice mosaic (up to 20 evenly spaced slices)
+    """
+    from scipy.ndimage import gaussian_filter
+    from skimage.measure import marching_cubes
+    from skimage.filters import threshold_otsu
+
+    print(f"      [Task 6] Loading full volume for {sample_name} ...")
+
+    try:
+        prep_vol, mask_vol = load_full_volume(sample_name)
+    except Exception as e:
+        print(f"      [Error] {e}")
+        return None
+
+    defect_mask = (mask_vol == 1)
+    n_slices    = prep_vol.shape[0]
+    print(f"      Shape: {prep_vol.shape}  |  Defect voxels: {defect_mask.sum():,}")
+
+    # ── 1. Solid Mesh + Ghost Shell ─────────────────────────────────────────
+    fig = plt.figure(figsize=(12, 10), facecolor="#0d0d0d")
+    ax  = fig.add_subplot(111, projection="3d")
+    ax.set_facecolor("#0d0d0d")
+
+    try:
+        if np.any(defect_mask):
+            smoothed_pores = gaussian_filter(
+                defect_mask.astype(np.float32), sigma=0.8
+            )
+            v_p, f_p, _, _ = marching_cubes(smoothed_pores, level=0.5)
+            ax.plot_trisurf(
+                v_p[:, 0], v_p[:, 1], v_p[:, 2],
+                triangles=f_p, color="#ff4444",
+                alpha=0.9, linewidth=0, antialiased=True
+            )
+            print(f"      [OK] Defect mesh rendered.")
+
+        smoothed_solid = gaussian_filter(prep_vol, sigma=0.8)
+        v_s, f_s, _, _ = marching_cubes(
+            smoothed_solid[::2, ::2, ::2],
+            level=threshold_otsu(smoothed_solid)
+        )
+        ax.plot_trisurf(
+            v_s[:, 0]*2, v_s[:, 1]*2, v_s[:, 2]*2,
+            triangles=f_s, color="#cccccc",
+            alpha=0.08, linewidth=0
+        )
+    except Exception as e:
+        print(f"      [Warning] Mesh failed: {e}")
+
+    ax.set_title(
+        f"3D Defect Volume — {sample_name}  ({n_slices} slices)",
+        color="white", pad=20
+    )
+    ax.set_xlabel("X", color="white")
+    ax.set_ylabel("Y", color="white")
+    ax.set_zlabel("Z (slice)", color="white")
+    dark_ax(ax)
+    plt.tight_layout()
+    save_fig(fig, 6, f"{sample_name}_3d_defect_mesh.png")
+
+    # ── 2. Defect Scatter ───────────────────────────────────────────────────
+    pz, py, px = np.where(defect_mask)
+    if len(pz) > 0:
+        if len(pz) > MAX_POINTS:
+            np.random.seed(RANDOM_SEED)
+            idx = np.random.choice(len(pz), MAX_POINTS, replace=False)
+            pz, py, px = pz[idx], py[idx], px[idx]
+
+        fig_sc = plt.figure(figsize=(9, 7), facecolor="#0d0d0d")
+        ax_sc  = fig_sc.add_subplot(111, projection="3d")
+        ax_sc.set_facecolor("#0d0d0d")
+        sc = ax_sc.scatter(px, py, pz, c=pz, cmap="Reds", s=1, alpha=0.6)
+        plt.colorbar(sc, ax=ax_sc, label="Slice depth (Z)",
+                     shrink=0.5, pad=0.1)
+        ax_sc.set_title(
+            f"Defect Scatter — {sample_name}  ({len(pz):,} pts)",
+            color="white"
+        )
+        ax_sc.set_xlabel("X", color="white")
+        ax_sc.set_ylabel("Y", color="white")
+        ax_sc.set_zlabel("Z", color="white")
+        dark_ax(ax_sc)
+        save_fig(fig_sc, 6, f"{sample_name}_defect_scatter.png")
+
+    # ── 3. Orthographic MIPs ────────────────────────────────────────────────
+    fig_op, axes = plt.subplots(2, 3, figsize=(15, 10), facecolor="#0d0d0d")
+    views   = [prep_vol.max(axis=0),    prep_vol.max(axis=1),    prep_vol.max(axis=2)]
+    d_views = [defect_mask.sum(axis=0), defect_mask.sum(axis=1), defect_mask.sum(axis=2)]
+    labels  = ["XY (Top)", "XZ (Front)", "YZ (Side)"]
+
+    for col in range(3):
+        axes[0, col].imshow(views[col], cmap="gray")
+        axes[0, col].set_title(f"{labels[col]} — MIP", color="white", fontsize=10)
+        axes[0, col].axis("off")
+        axes[1, col].imshow(d_views[col], cmap="hot")
+        axes[1, col].set_title(f"{labels[col]} — Defect Density",
+                               color="white", fontsize=10)
+        axes[1, col].axis("off")
+
+    plt.tight_layout()
+    save_fig(fig_op, 6, f"{sample_name}_orthographic_mip.png")
+
+    # ── 4. Slice Mosaic (up to 20 evenly spaced) ────────────────────────────
+    step   = max(1, n_slices // 20)
+    shown  = list(range(0, n_slices, step))[:20]
+    n_cols = min(5, len(shown))
+    n_rows = (len(shown) + n_cols - 1) // n_cols
+
+    fig_mo, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(4 * n_cols, 4 * n_rows),
+        facecolor="#0d0d0d"
+    )
+    axes = np.array(axes).reshape(n_rows, n_cols)
+
+    for i, sl_idx in enumerate(shown):
+        row, col = divmod(i, n_cols)
+        axes[row, col].imshow(prep_vol[sl_idx], cmap="gray", vmin=0, vmax=1)
+        axes[row, col].imshow(defect_mask[sl_idx], cmap="Reds", alpha=0.4)
+        axes[row, col].set_title(f"Slice {sl_idx}", color="#aaaaaa", fontsize=8)
+        axes[row, col].axis("off")
+
+    for i in range(len(shown), n_rows * n_cols):
+        row, col = divmod(i, n_cols)
+        axes[row, col].axis("off")
+
+    plt.tight_layout()
+    save_fig(fig_mo, 6, f"{sample_name}_slice_mosaic.png")
+
+    return defect_mask
+
+
+def cross_sample_3d_combined(sample_names: list):
+    """
+    Stacks all samples along Z into one combined defect scatter.
+    """
+    print("\n  [Task 6 Cross-sample] Building combined 3D scatter ...")
+    all_pz, all_py, all_px, all_labels = [], [], [], []
+    colors_per_sample = plt.cm.tab10(np.linspace(0, 1, len(sample_names)))
+    z_offset = 0
+
+    for name, color in zip(sample_names, colors_per_sample):
+        try:
+            _, mask_vol = load_full_volume(name)
+            defect = mask_vol == 1
+            pz, py, px = np.where(defect)
+            if len(pz) > MAX_POINTS // len(sample_names):
+                np.random.seed(RANDOM_SEED)
+                idx = np.random.choice(
+                    len(pz), MAX_POINTS // len(sample_names), replace=False
+                )
+                pz, py, px = pz[idx], py[idx], px[idx]
+            all_pz.append(pz + z_offset)
+            all_py.append(py)
+            all_px.append(px)
+            all_labels.append((name, color, z_offset, z_offset + mask_vol.shape[0]))
+            z_offset += mask_vol.shape[0]
+            print(f"    {name}: {defect.sum():,} defect voxels")
+        except Exception as e:
+            print(f"    [Skip] {name}: {e}")
+
+    if not all_pz:
+        return
+
+    fig = plt.figure(figsize=(12, 10), facecolor="#0d0d0d")
+    ax  = fig.add_subplot(111, projection="3d")
+    ax.set_facecolor("#0d0d0d")
+
+    for i, (pz_s, py_s, px_s, (name, color, _, _)) in enumerate(
+        zip(all_pz, all_py, all_px, all_labels)
+    ):
+        ax.scatter(px_s, py_s, pz_s, c=[color], s=1,
+                   alpha=0.5, label=name)
+
+    ax.set_title(
+        f"Combined 3D Defects — All Samples  ({len(sample_names)} samples)",
+        color="white", pad=15
+    )
+    ax.set_xlabel("X", color="white")
+    ax.set_ylabel("Y", color="white")
+    ax.set_zlabel("Z (stacked)", color="white")
+    ax.legend(facecolor="#1a1a1a", labelcolor="white", markerscale=5)
+    dark_ax(ax)
+    plt.tight_layout()
+    save_fig(fig, 6, "all_samples_combined_3d_scatter.png")
 
 
 # =============================================================================
@@ -934,6 +1228,15 @@ def main():
         except Exception as e:
             print(f"    [ERROR] Task 5 failed: {e}")
 
+        # ── Task 6 ──────────────────────────────────────────────────────────
+        print(f"\n  [Task 6] Full 3D defect volume ...")
+        try:
+            t0 = time.time()
+            task6(sample_name)
+            print(f"    Done in {time.time()-t0:.1f}s")
+        except Exception as e:
+            print(f"    [ERROR] Task 6 failed: {e}")
+
     # ── Cross-sample figures & CSVs ──────────────────────────────────────────
     print(f"\n{'='*65}")
     print("  Cross-sample summaries ...")
@@ -953,7 +1256,8 @@ def main():
     if t4_results:
         cross_sample_patch_counts(t4_results)
         save_csv_patches(t4_results)
-
+    # Cross-sample combined 3D
+    cross_sample_3d_combined([d.name for d in sample_dirs])
     # ── Final summary ────────────────────────────────────────────────────────
     elapsed = time.time() - total_start
     print(f"\n{'='*65}")

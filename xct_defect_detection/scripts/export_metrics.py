@@ -1,7 +1,11 @@
 """
 export_metrics.py — Run pipeline and export metrics to CSV
 """
+import sys
+from pathlib import Path
 
+# Add project root to path so config.py can be found
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pathlib import Path
 import csv
 import tifffile as tiff

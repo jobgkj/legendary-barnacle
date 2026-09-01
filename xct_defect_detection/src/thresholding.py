@@ -53,18 +53,20 @@ def get_default_params() -> dict:
     Returns
     -------
     dict with keys:
-        bernsen_radius              : int
-        bernsen_dct_auto            : bool
-        bernsen_dct_std_multiplier  : int
-        bernsen_dct                 : int   (fallback fixed value)
-        bernsen_low_contrast_thresh : int
+        bernsen_radius                  : int
+        bernsen_dct_auto                : bool
+        bernsen_dct_std_multiplier      : int
+        bernsen_dct                     : int   (fallback fixed value)
+        bernsen_low_contrast_adaptive   : bool
+        bernsen_low_contrast_thresh     : int   (fallback fixed value)
     """
     return {
-        "bernsen_radius":               config.BERNSEN_RADIUS,
-        "bernsen_dct_auto":             config.BERNSEN_DCT_AUTO,
-        "bernsen_dct_std_multiplier":   config.BERNSEN_DCT_STD_MULTIPLIER,
-        "bernsen_dct":                  config.BERNSEN_DCT,
-        "bernsen_low_contrast_thresh":  config.BERNSEN_LOW_CONTRAST_THRESH,
+        "bernsen_radius":                 config.BERNSEN_RADIUS,
+        "bernsen_dct_auto":               config.BERNSEN_DCT_AUTO,
+        "bernsen_dct_std_multiplier":     config.BERNSEN_DCT_STD_MULTIPLIER,
+        "bernsen_dct":                    config.BERNSEN_DCT,
+        "bernsen_low_contrast_adaptive":  config.BERNSEN_LOW_CONTRAST_ADAPTIVE,
+        "bernsen_low_contrast_thresh":    config.BERNSEN_LOW_CONTRAST_THRESH,
     }
 
 
@@ -202,6 +204,60 @@ def compute_dct_from_image(img: np.ndarray) -> int:
 
 
 # =============================================================================
+# Adaptive low-contrast fallback threshold
+# =============================================================================
+
+def compute_low_contrast_threshold(
+    img:         np.ndarray,
+    sample_mask: "np.ndarray | None" = None,
+) -> int:
+    """
+    Compute the fallback threshold Bernsen uses for low-contrast regions,
+    adapted to this image's own brightness distribution rather than a
+    single fixed constant.
+
+    config.BERNSEN_LOW_CONTRAST_THRESH (128) is a reasonable split point
+    only for samples whose solid phase averages brighter than 128. In
+    practice DCT (compute_dct_from_image) comes out far higher than
+    Kim et al.'s reported ~15 across every sample measured so far, which
+    routes nearly every pixel through this low-contrast fallback instead
+    of genuine local adaptive thresholding — so this one constant ends up
+    doing most of the classification work. For darker-averaging samples
+    (median intensity well under 128) a fixed 128 threshold misclassifies
+    most of the genuinely solid material as pore.
+
+    Otsu's method finds a good bimodal split point from the image's own
+    histogram, restricted to the pixels inside sample_mask (if given) so
+    dark background doesn't skew the estimate — background is already
+    forced to solid by _apply_sample_mask regardless of this threshold,
+    but including it here would still bias the split point computed for
+    the genuinely-in-sample pixels.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        2D uint8 preprocessed image.
+    sample_mask : np.ndarray, optional
+        uint8 mask (1 = inside sample, 0 = outside). When given, Otsu is
+        computed only over in-sample pixels.
+
+    Returns
+    -------
+    int
+        Adaptive threshold in [0, 255]. Falls back to
+        config.BERNSEN_LOW_CONTRAST_THRESH if the candidate region is
+        degenerate (empty mask, or a single uniform intensity — Otsu is
+        undefined on a one-value histogram).
+    """
+    region = img if sample_mask is None else img[sample_mask.astype(bool)]
+
+    if region.size == 0 or region.min() == region.max():
+        return config.BERNSEN_LOW_CONTRAST_THRESH
+
+    return int(threshold_otsu(region))
+
+
+# =============================================================================
 # Global thresholding — Otsu
 # =============================================================================
 
@@ -325,8 +381,15 @@ def bernsen(
             uses config.BERNSEN_DCT (fixed fallback).
         Pass an explicit int to override both.
     low_contrast_thresh : int, optional
-        Fixed intensity threshold for low-contrast regions.
-        Defaults to config.BERNSEN_LOW_CONTRAST_THRESH (= 128).
+        Intensity threshold for low-contrast regions.
+        If None and config.BERNSEN_LOW_CONTRAST_ADAPTIVE = True (default):
+            auto-computed per image via compute_low_contrast_threshold()
+            (Otsu on the in-sample-mask pixels) — adapts to this image's
+            own brightness instead of assuming one constant fits every
+            sample.
+        If None and config.BERNSEN_LOW_CONTRAST_ADAPTIVE = False:
+            uses the fixed config.BERNSEN_LOW_CONTRAST_THRESH (= 128).
+        Pass an explicit int to override both.
     sample_mask : np.ndarray, optional
         uint8 mask (1 = inside sample, 0 = outside).
         Outside-sample pixels are forced to solid (0).
@@ -343,10 +406,18 @@ def bernsen(
     """
 
     # ------------------------------------------------------------------
+    # Validation (done first — DCT/low_contrast_thresh auto-computation
+    # below both need a validated img/sample_mask to safely index into)
+    # ------------------------------------------------------------------
+    _validate_image(img)
+
+    if sample_mask is not None:
+        _validate_sample_mask(sample_mask, img.shape)
+
+    # ------------------------------------------------------------------
     # Fall back to config for any unset parameters
     # ------------------------------------------------------------------
-    if radius              is None: radius              = config.BERNSEN_RADIUS
-    if low_contrast_thresh is None: low_contrast_thresh = config.BERNSEN_LOW_CONTRAST_THRESH
+    if radius is None: radius = config.BERNSEN_RADIUS
 
     # Auto-compute DCT from image if enabled and not manually overridden
     if DCT is None:
@@ -355,13 +426,14 @@ def bernsen(
         else:
             DCT = config.BERNSEN_DCT
 
-    # ------------------------------------------------------------------
-    # Validation
-    # ------------------------------------------------------------------
-    _validate_image(img)
-
-    if sample_mask is not None:
-        _validate_sample_mask(sample_mask, img.shape)
+    # Auto-compute the low-contrast fallback threshold if enabled and
+    # not manually overridden — see compute_low_contrast_threshold()
+    # docstring for why a single fixed value doesn't generalise.
+    if low_contrast_thresh is None:
+        if config.BERNSEN_LOW_CONTRAST_ADAPTIVE:
+            low_contrast_thresh = compute_low_contrast_threshold(img, sample_mask)
+        else:
+            low_contrast_thresh = config.BERNSEN_LOW_CONTRAST_THRESH
 
     if radius <= 0:
         raise ValueError(f"radius must be positive, got {radius}.")

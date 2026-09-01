@@ -190,6 +190,7 @@ def load_and_generate_masks(
 
     total   = len(tiff_files)
     skipped = 0
+    empty   = 0
 
     print(f"  Found {total} slices in {input_dir}")
 
@@ -256,17 +257,38 @@ def load_and_generate_masks(
                 erosion_radius=config.SAMPLE_MASK_EROSION_RADIUS,
             )
 
-        # Generate masks — pass sample_mask to exclude air background
-        masks = {
-            "otsu":    otsu(img,     sample_mask=sample_mask),
-            "yen":     yen(img,      sample_mask=sample_mask),
-            "bernsen": bernsen(
-                img,
-                radius=bernsen_radius,
-                DCT=bernsen_dct,          # None = auto-compute per slice
-                sample_mask=sample_mask,
-            ),
-        }
+        # Empty-slice check: the stack-level circle is reused for every
+        # slice, including ones near the top/bottom of the scan where no
+        # physical object is actually present yet (or any more) — just
+        # air/noise inside that circle. Thresholding those anyway
+        # misclassifies the whole circular region as one large "pore",
+        # which shows up as flat, over-segmented discs at the top/bottom
+        # of a 3D reconstruction. If too little of the (would-be) sample
+        # region is actually bright/solid material, skip thresholding
+        # and write empty (all-zero, no-defect) masks instead.
+        is_empty_slice = False
+        if sample_mask is not None:
+            region = img[sample_mask.astype(bool)]
+            if region.size > 0:
+                object_fraction = float((region > config.SAMPLE_MASK_AIR_THRESHOLD).mean())
+                is_empty_slice = object_fraction < config.EMPTY_SLICE_MIN_OBJECT_FRACTION
+
+        if is_empty_slice:
+            empty += 1
+            zeros = np.zeros_like(img, dtype=np.uint8)
+            masks = {"otsu": zeros, "yen": zeros, "bernsen": zeros.copy()}
+        else:
+            # Generate masks — pass sample_mask to exclude air background
+            masks = {
+                "otsu":    otsu(img,     sample_mask=sample_mask),
+                "yen":     yen(img,      sample_mask=sample_mask),
+                "bernsen": bernsen(
+                    img,
+                    radius=bernsen_radius,
+                    DCT=bernsen_dct,          # None = auto-compute per slice
+                    sample_mask=sample_mask,
+                ),
+            }
 
         # Save — preserve original filename exactly
         for method, mask in masks.items():
@@ -283,11 +305,15 @@ def load_and_generate_masks(
     print(f"\n  Done — {processed}/{total} slices processed.")
     if skipped:
         print(f"  Skipped: {skipped} slice(s) — check warnings above.")
+    if empty:
+        print(f"  Empty (no object present): {empty} slice(s) — written as "
+              f"all-zero masks instead of thresholded.")
     print(f"  Masks saved to: {mask_root}")
 
     return {
         "total":     total,
         "processed": processed,
         "skipped":   skipped,
+        "empty":     empty,
         "mask_dir":  mask_root,
     }
