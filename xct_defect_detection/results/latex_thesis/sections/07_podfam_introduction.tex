@@ -1,0 +1,64 @@
+% =============================================================================
+% Chapter 7: Introduction -- Part II
+% =============================================================================
+
+\mysection{Note on scope (Part II)}
+This part reports the PODFAM validation phase of the thesis, conducted on the University West
+PODFAM metal additive manufacturing (AM) XCT sample set (sample\_01--sample\_05, with sample\_07
+added as an extended check in Section~10.5). It follows the plan already stated in the Part I
+Preface: development on the NIST CoCr benchmark, followed by validation on PODFAM
+process-monitoring data. Every figure and table in this part was generated directly from the working
+pipeline during this validation phase; none of the NIST-dataset figures or numbers from Part I were
+re-run, re-verified, or altered here.
+
+Where this part's methodology differs materially from Part I, pseudo-label method (Bernsen instead
+of two-stage Otsu) and preprocessing pipeline (median filter + non-local means only, without
+beam-hardening correction or ring-artefact suppression), the difference is stated explicitly rather
+than silently merged with the Part I description.
+
+\mysection{Abstract (Part II)}
+This part presents the validation of an automated XCT defect-detection pipeline on five, later
+extended to seven, Ti-6Al-4V metal additive manufacturing components from the PODFAM research
+project at University West, manufactured by laser powder bed fusion (PBF-LB) on an Aconity Two
+machine and characterised by X-ray computed tomography on a Waygate v|tome|x M 240 system. Three
+classical thresholding methods (Otsu, Yen, Bernsen) were compared over full slice volumes
+(749--1,473 slices per sample) rather than single representative slices, and a 2D U-Net was trained
+using Bernsen pseudo-labels on the sample ranked most defect-rich by voxel content, validated on a
+second sample, and tested on a fully held-out third. The trained detector achieved a validation Dice
+coefficient of 0.600 (IoU 0.452, recall 0.954) at its best checkpoint, and on the held-out test
+sample predicted a total defect volume fraction of 0.041\% against a pseudo-label fraction of
+0.043\%, closely matching overall porosity despite a lower per-pixel overlap (Dice 0.147). Yen
+thresholding was found to over-segment catastrophically on every sample (38--48\% ``porosity'',
+physically implausible for a metal AM part), consistent with prior literature. A calibration failure
+in the Bernsen method's automatic contrast-threshold estimation was identified on one sample and
+independently reproduced, at a smaller magnitude, on a sixth PODFAM sample (sample\_07) processed
+after the original five-sample validation, tying the failure to processed-image mean intensity
+rather than to any single sample. The part closes with an explicit statement of the methodological
+limitations inherent to a small validation set with no independently verified ground truth.
+
+\mychapter{7. Introduction}
+
+Additive manufacturing (AM) of metal components is increasingly used for structurally critical
+parts, and X-ray computed tomography (XCT) remains the principal non-destructive method for
+detecting internal porosity, lack-of-fusion voids, and inclusions in these
+parts~\citep{Deshpande2024,Zhang2021}. The volume of data produced by a single XCT scan, hundreds to
+thousands of 2D slices, makes manual inspection impractical at industrial scale, motivating
+automated segmentation pipelines built on classical thresholding, deep learning, or a combination of
+the two~\citep{Zubayer2023}.
+
+This part validates such a pipeline on real process-monitoring data from the PODFAM research
+project, distinct from the NIST CoCr benchmark dataset used in Part I. The PODFAM sample set
+consists of five XCT-scanned metal AM components (sample\_01--sample\_05) used for the core
+validation in Sections~9--11, each comprising 749--900 slices at approximately $1010\times980$ pixel
+resolution, later extended in Section~10.5 with sample\_07 (1,473 slices, $1143\times1215$ pixels).
+No expert-annotated ground truth exists for any PODFAM sample; automatic pseudo-labelling is
+therefore required, as in Part I, but a different classical method is used here and the reasoning
+for that choice is given in Section~8.
+
+This part is organised as follows. Section~8 reviews the literature that directly informed the
+choice of pseudo-labelling method and the framing of the deep-learning comparison. Section~9
+describes the preprocessing, labelling, sample-selection, and training methodology. Section~10
+reports full-volume quantitative results for all three classical methods and the trained detector,
+including the sample\_07 extension (10.5). Section~11 discusses the results, including a documented
+failure mode found during this work. Section~12 states the limitations of the validation explicitly,
+and Section~13 concludes.

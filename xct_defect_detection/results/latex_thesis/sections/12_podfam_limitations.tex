@@ -1,0 +1,31 @@
+% =============================================================================
+% Chapter 12: Limitations -- Part II
+% =============================================================================
+\mychapter{12. Limitations}
+
+\begin{itemize}
+\item No independently verified ground truth exists for any PODFAM sample. Every Dice, IoU,
+  precision, and recall value in this part measures agreement with the Bernsen pseudo-label, not
+  with a verified physical defect map. Bernsen was selected because comparative literature reports
+  it as the more reliable of the three classical methods evaluated~\citep{Kim2017}, but it remains a
+  proxy rather than ground truth.
+\item The core validation set comprises five samples, two of which were excluded (sample\_03 as
+  near-empty, sample\_05 for a documented labelling artefact), leaving a 1-train / 1-validation /
+  1-test split. This sample size cannot support a statistical claim of generalisation; the reported
+  results should be read as a feasibility demonstration on this pipeline and this specific data, not
+  as an estimate of expected performance on unseen PODFAM parts in general.
+\item Training uses 80 evenly-spaced slices per volume rather than the full 749--900, a deliberate
+  trade-off to keep per-epoch training time practical on the available hardware; full-slice training
+  was measured to exceed three hours per epoch under equivalent conditions.
+\item The pixel-to-physical-unit conversion factor (\texttt{PIXEL\_SIZE\_UM}) used elsewhere in this
+  pipeline's configuration was not calibrated to the PODFAM scans' actual voxel size for this
+  validation phase; all size figures in this part are reported in pixels, not micrometres, for that
+  reason.
+\item Preprocessing for the PODFAM phase (Section~9.2) omits the beam-hardening correction and
+  ring-artefact suppression stages used in the Part I pipeline; the two parts' preprocessing outputs
+  are not numerically comparable to one another.
+\item sample\_07 (Section~10.5) is a single additional sample run through inference only, with no
+  ground-truth role and no retraining. Its U-Net prediction being more plausible than the classical
+  methods' is a single data point consistent with the pipeline's other results, not an independent
+  validation of detector accuracy on new, unseen scan conditions.
+\end{itemize}

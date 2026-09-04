@@ -1,0 +1,200 @@
+% =============================================================================
+% Appendix A: Software Repository and Pipeline
+% =============================================================================
+\mychapter{Appendix A --- Software Repository and Pipeline}
+
+This appendix documents the software repository structure, installation instructions, and pipeline
+execution steps for the automated XCT defect detection pipeline developed in this thesis. The
+repository structure below reflects the codebase's current, actual layout as of August 2026, which
+has been substantially restructured since the April 2026 mid-term submission (a \url{src/}
+package and a \url{scripts/} entry-point folder were introduced, and preprocessing/label-generation
+logic moved out of the originally-described \url{data/loader.py} and
+\url{data/pseudo_labels.py}); see the Note on this combined document.
+
+\mysection{A.1 Repository Access}
+\begin{table}[htbp]
+\centering
+\caption{Repository information.}
+\begin{tabular}{lp{10cm}}
+\toprule
+\textbf{Field} & \textbf{Value} \\
+\midrule
+Platform & GitHub \\
+Repository URL & \url{https://github.com/jobgkj/podfam_research_project_XCT_Anlaysis} \\
+Branch & main \\
+Language & Python 3.10+ \\
+Last commit & August 2026 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\mysection{A.2 Repository Structure (current)}
+Top level:
+\begin{itemize}
+\item \texttt{config.py} --- all hyperparameters and paths, including PODFAM-phase additions
+  (\param{TRAINING\_SAMPLES\_OVERRIDE}, \param{MAX\_TRAINING\_SAMPLES}, \param{EXPERIMENT\_NAME},
+  Bernsen parameters)
+\item \texttt{pipeline.py} --- end-to-end 2D(+3D) training entry point
+\end{itemize}
+
+\url{src/} --- preprocessing, thresholding, and I/O (introduced after the mid-term; supersedes
+the originally-planned \url{data/loader.py} and \url{data/pseudo_labels.py}):
+\begin{itemize}
+\item \url{src/preprocess.py} --- per-slice preprocessing (median filter + adaptive NLM
+  denoising)
+\item \url{src/thresholding.py} --- Otsu, Yen, and Bernsen thresholding (Bernsen is the
+  PODFAM-phase primary pseudo-label source; see Part II, Section~9.3)
+\item \url{src/sample_mask.py} --- circular sample-boundary detection
+\item \url{src/io.py} --- mask generation orchestration
+\item \url{src/metrics.py} --- per-pore connected-component statistics
+\end{itemize}
+
+\url{data/} --- dataset and caching:
+\begin{itemize}
+\item \url{data/cache.py} --- memory-mapped volume/mask cache (introduced after the mid-term, for
+  training on volumes too large to hold fully in RAM)
+\item \url{data/dataset.py}, \url{data/dataset_3d.py} --- PyTorch Dataset and patch
+  extraction
+\item \url{data/augmentation.py} --- online augmentation transforms
+\end{itemize}
+
+\url{models/}:
+\begin{itemize}
+\item \url{models/unet2d.py} --- 2D U-Net architecture
+\item \url{models/unet3d.py} --- 3D U-Net architecture
+\item \url{models/thesis_analysis.py} --- figure-generation script (renamed and moved from the
+  originally-described root-level \texttt{thesis\_analysis.py})
+\end{itemize}
+
+\url{training/}:
+\begin{itemize}
+\item \url{training/losses.py} --- BCE, Dice, Focal, Dice-Focal
+\item \url{training/metrics.py} --- Dice, IoU, Precision, Recall
+\item \url{training/trainer.py} --- training loop with MLflow tracking, early stopping, and
+  best-model checkpointing
+\end{itemize}
+
+\url{scripts/} --- command-line entry points (introduced after the mid-term; supersedes the
+originally-described root-level \texttt{run\_preprocess.py}):
+\begin{itemize}
+\item \url{scripts/run_preprocess.py}, \url{scripts/run_single_sample.py},
+  \url{scripts/generate_training_data.py} --- preprocessing and mask-generation drivers
+\item \url{scripts/predict_and_visualize_3d.py} --- trained-model inference and 3D
+  reconstruction
+\item \url{scripts/compare_methods_report.py} --- classical-vs-U-Net comparison table generator
+\item \url{scripts/check_training_status.py} --- MLflow-based training status checker
+\end{itemize}
+
+\url{data/raw/}, \url{data/processed/}, \url{data/masks/} --- input and intermediate data
+(not in Git); \url{mlruns/} --- MLflow tracking store (not in Git); \url{artifacts/} --- trained
+model checkpoints (not in Git); \url{results/} --- figures, predictions, comparison tables, and
+the thesis chapter document.
+
+\mysection{A.3 Installation}
+\mysubsection{A.3.1 Prerequisites}
+\begin{itemize}
+\item Python 3.10 or later
+\item Git
+\item pip package manager
+\item NVIDIA GPU with CUDA support (recommended for model training)
+\end{itemize}
+
+\mysubsection{A.3.2 Setup Steps}
+Clone the repository and install dependencies:
+\begin{verbatim}
+git clone https://github.com/jobgkj/podfam_research_project_XCT_Anlaysis
+cd podfam_research_project_XCT_Anlaysis/xct_defect_detection
+python -m venv .venv
+.venv\Scripts\activate      (Windows)
+source .venv/bin/activate   (Linux/macOS)
+pip install -r requirements.txt
+\end{verbatim}
+
+\mysubsection{A.3.3 Required Python Packages}
+\begin{table}[htbp]
+\centering
+\caption{Key Python dependencies.}
+\begin{tabular}{p{3.2cm}p{4.4cm}p{5.6cm}}
+\toprule
+\textbf{Package} & \textbf{Version} & \textbf{Purpose} \\
+\midrule
+torch & 2.0+ (cu124 build for GPU) & Deep learning framework \\
+numpy & 1.24+ & Array operations \\
+tifffile & 2023+ & TIFF stack loading \\
+scikit-image & 0.21+ & Image processing, NLM denoising, marching cubes \\
+scipy & 1.11+ & Median filter, polynomial fitting \\
+matplotlib & 3.7+ & Figure generation \\
+mlflow & 2.5+ & Experiment tracking \\
+python-docx & 1.2+ & Thesis document generation \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\mysection{A.4 Running the Pipeline}
+Preprocess and generate masks for one sample:
+\begin{verbatim}
+python scripts/run_single_sample.py sample_07
+\end{verbatim}
+
+Run the full 2D U-Net training pipeline:
+\begin{verbatim}
+python pipeline.py
+\end{verbatim}
+
+Run inference and 3D visualisation on a trained checkpoint:
+\begin{verbatim}
+python scripts/predict_and_visualize_3d.py sample_07
+\end{verbatim}
+
+Generate the classical-vs-U-Net comparison table:
+\begin{verbatim}
+python scripts/compare_methods_report.py
+\end{verbatim}
+
+View experiment results in MLflow:
+\begin{verbatim}
+mlflow ui --backend-store-uri mlruns
+\end{verbatim}
+then open \url{http://localhost:5000} in a browser.
+
+\mysection{A.5 Version Control and Reproducibility}
+\begin{itemize}
+\item All source code, configuration files, and documentation are committed to the main branch
+\item Raw data, preprocessed outputs, model checkpoints, and MLflow logs are excluded via
+  \texttt{.gitignore} due to file size
+\item All experiments are logged in MLflow with full hyperparameter and metric records, enabling
+  exact reproduction of any training run, tagged by \texttt{EXPERIMENT\_NAME} (Section~9.4)
+\end{itemize}
+
+\mysection{A.6 Interactive 3D Defect Viewer (gui\_app.py)}
+A standalone desktop GUI, \texttt{gui\_app.py}, provides an interactive front end to the trained U-Net
+detector, wrapping the same inference pipeline as \url{scripts/predict_and_visualize_3d.py} in a
+Tkinter application:
+
+\begin{itemize}
+\item \textbf{Folder selection}: a file dialog lets the user pick any local folder of TIFF slices
+  (not limited to the pre-registered \texttt{sample\_NN} folders under \texttt{data/raw/}), and a
+  second dialog selects the checkpoint to run, defaulting to
+  \texttt{artifacts/best\_model\_\{EXPERIMENT\_NAME\}.pt}.
+\item \textbf{Inference}: on ``Run'', the selected volume is preprocessed with the same
+  \texttt{src/preprocess.py} pipeline used throughout this thesis, then run through the network using
+  the identical sliding-window inference procedure and patch configuration ($256 \times 256$ patches,
+  stride 128) as \texttt{scripts/predict\_and\_visualize\_3d.py}. Preprocessing and inference progress
+  are shown live via a progress bar, running on a background thread so the window stays responsive.
+\item \textbf{Defect-zone highlighting}: the predicted defect voxels are reconstructed into a
+  marching-cubes mesh and rendered in red against a dark background; only defect voxels are drawn, so
+  the mesh itself directly highlights the predicted defect zones in three dimensions, with no separate
+  overlay step required.
+\item \textbf{Interactive 3D controls}: the mesh is displayed in an embedded, mouse-controllable
+  viewer, drag to rotate, scroll to zoom, plus a navigation toolbar for pan, zoom, reset, and
+  saving the current view as an image.
+\item \textbf{Metrics panel}: after each run, a metrics panel reports the total defect fraction, pore
+  count, mean pore area, and mean equivalent diameter for the predicted volume, computed via
+  \texttt{src/metrics.py}'s connected-component analysis pooled across every slice, the same
+  computation used to produce Tables 10.1--10.5.
+\end{itemize}
+
+Run it from the repository root with:
+\begin{verbatim}
+python gui_app.py
+\end{verbatim}

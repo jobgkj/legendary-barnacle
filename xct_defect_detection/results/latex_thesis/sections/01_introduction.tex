@@ -1,0 +1,138 @@
+% =============================================================================
+% Chapter 1: Introduction (Part I)
+% =============================================================================
+\mychapter{1. Introduction}
+
+The global adoption of additive manufacturing for the production of structurally critical metal
+components has accelerated considerably over the past decade. Industries including aerospace,
+automotive, and biomedical engineering have embraced metal AM processes such as laser powder bed
+fusion (LPBF), directed energy deposition (DED), and electron beam melting (EBM) for their ability to
+produce components with complex internal geometries, reduced material waste, and shortened lead
+times compared to traditional machining and casting routes~\citep{Deshpande2024}.
+
+Despite these advantages, metal AM processes are inherently susceptible to the formation of internal
+defects during fabrication. These defects arise from the complex physics of rapid solidification,
+thermal gradients, powder feedstock variability, and laser or beam parameter instability. The most
+commonly observed defect classes include gas porosity arising from entrapped gas in the melt pool,
+lack-of-fusion (LoF) voids caused by insufficient energy density and incomplete melting of adjacent
+powder particles, micro-cracks resulting from thermal stresses and residual strain accumulation, and
+metallic inclusions originating from contaminated powder or redeposited spatter~\citep{Zubayer2023}.
+Each of these defect types can initiate fatigue crack growth under cyclic loading, dramatically
+reducing component service life and potentially causing catastrophic failure in safety-critical
+applications~\citep{Liu2024}.
+
+Effective, reliable, and efficient defect inspection is therefore not merely a quality assurance
+concern but a fundamental prerequisite for the safe deployment of AM components. X-ray computed
+tomography has established itself as the gold standard for volumetric non-destructive inspection,
+capable of imaging internal features at resolutions approaching the micrometre scale without
+requiring sectioning or destruction of the component~\citep{Miller2020}. The NIST CoCr AM XCT dataset
+used in this work, comprising 900 slices at $1010 \times 980$ pixel resolution with a raw intensity
+range of $[0, 59631]$, is representative of the scale and complexity typical of industrial XCT
+inspection tasks~\citep{NIST_CoCr}.
+
+However, the volumetric nature of XCT data creates substantial challenges for manual analysis. Expert
+radiographers or materials engineers must review vast quantities of image data, a process that is
+time-consuming, costly, operator-dependent, and difficult to scale to industrial production volumes.
+The primary technical bottleneck in XCT-based defect analysis is not data acquisition but data
+interpretation: specifically, the automated detection and localisation of defect regions within
+noisy, artefact-affected volumetric images.
+
+Classical approaches based on global thresholding such as Otsu's method~\citep{Otsu1979},
+morphological filtering, and edge detection fail under the imaging conditions typical of dense metal
+scans, where defects and the surrounding metal matrix occupy similar greyscale intensity ranges and
+beam hardening artefacts create systematic intensity gradients across the image
+volume~\citep{Bellens2021}. In the NIST AM Bench dataset, Otsu thresholding achieves Dice scores of
+only 0.43--0.61 for porosity detection, compared to 0.82--0.91 for CNN-based
+approaches~\citep{Wong2022}, confirming the limitations of classical methods for this application.
+
+Deep learning, and in particular fully convolutional architectures such as
+U-Net~\citep{Ronneberger2015}, offers a fundamentally different approach. Rather than relying on
+hand-crafted intensity thresholds or morphological rules, deep learning models learn rich
+hierarchical representations of spatial context, texture, and shape directly from training data. This
+enables them to detect and localise defect voxels even under challenging noise and contrast
+conditions, and to generalise across different component geometries and scan settings when trained on
+sufficiently diverse datasets~\citep{Zubayer2023}.
+
+A critical practical challenge in this thesis is the absence of expert-annotated ground truth masks
+for the NIST CoCr AM XCT dataset~\citep{NIST_CoCr}. This is addressed through an automatic label
+generation strategy: Otsu thresholding is applied within the metal region only, not the air
+background, to generate binary detection labels, which then serve as training supervision for the 2D
+U-Net. This approach follows Yosifov~\citep{Yosifov2020}, who used Otsu-derived labels to train a
+modified 3D U-Net for XCT analysis of fibre-reinforced polymers, and is justified by the observation
+that the trained U-Net already achieves a validation Dice score of 0.68 after 20 epochs, compared to
+0.41 for the BCE baseline and 0.38 for the Otsu label generator itself, demonstrating that the model
+learns to detect defects beyond the capability of its own training labels.
+
+This thesis addresses the design, implementation, and empirical validation of a deep learning
+pipeline for automated XCT defect detection in additively manufactured metal parts. The complete
+pipeline, covering preprocessing, automatic label generation, patch extraction, data augmentation,
+model training, and evaluation, has been implemented in Python, version-controlled on Git, and
+validated on the NIST CoCr \texttt{set1sample2raw} dataset. Part II of this document extends the
+validation to real PODFAM process-monitoring data.
+
+\mysection{1.1 Aim}
+The aim of this thesis is to develop, implement, and validate an automated deep learning-based
+pipeline for the detection of internal defects in XCT scans of additively manufactured metal
+components. The work emphasises rigorous empirical methodology: systematic comparison of a deep
+learning detector (2D U-Net) against a classical baseline (Otsu thresholding) using standardised
+evaluation metrics on the NIST CoCr AM XCT benchmark dataset, followed by assessment of robustness
+across preprocessing configurations and loss function formulations.
+
+The ultimate deliverable is a documented, validated, and open-source defect detection pipeline that
+can be adopted or extended by manufacturing organisations seeking to automate XCT-based quality
+assurance.
+
+\mysection{1.2 Research Questions}
+This thesis is structured around the following specific research questions:
+\begin{enumerate}
+\item \textbf{RQ1}: How effectively can a preprocessing pipeline reduce imaging artefacts and noise
+  in XCT scans of AM metal components, as measured by signal-to-noise ratio improvement and visual
+  inspection of defect-relevant structures across all four pipeline stages?
+\item \textbf{RQ2}: What preprocessing parameter configurations, specifically NLM filter strength,
+  BHC polynomial degree, and ring artefact filter radius, produce optimal image quality for
+  subsequent automated defect detection?
+\item \textbf{RQ3}: How do preprocessing strategies, patch extraction, and data augmentation affect
+  the quality of automatically generated detection labels and downstream 2D U-Net detection
+  performance under conditions of severe class imbalance (1.2--2.8\% defect voxels)?
+\item \textbf{RQ4}: What loss function formulations best address the class imbalance inherent in XCT
+  defect data, and how does loss function choice affect detection accuracy as measured by Dice
+  coefficient, IoU, precision, and recall?
+\item \textbf{RQ5}: Does a 2D U-Net trained on classically-derived pseudo-labels from one industrial
+  dataset generalize to a fully held-out sample and to an out-of-distribution sample from the same
+  process, as measured by both pixel-level overlap and volume-fraction agreement?
+\item \textbf{RQ6}: Are classical thresholding methods (Otsu, Yen, Bernsen) reliable enough to serve
+  as an independent, unsupervised comparison baseline across a real industrial sample set, or do they
+  carry systematic, sample-dependent failure modes that could be mistaken for genuine measurement?
+\end{enumerate}
+
+\mysection{1.3 Contributions}
+The main contributions of this thesis are:
+\begin{itemize}
+\item A complete end-to-end Python pipeline for XCT defect detection covering preprocessing,
+  automatic label generation, patch-based data preparation, 2D U-Net training, and evaluation, fully
+  version-controlled on Git with MLflow experiment tracking and following FAIR data stewardship
+  principles~\citep{Wilkinson2016}.
+\item A systematic preprocessing pipeline validated on the NIST CoCr \texttt{set1sample2raw} dataset
+  (900 slices, $1010 \times 980$ pixels, raw range $[0, 59631]$), achieving noise standard deviation
+  reduction from 20952 to 0.385, a factor of $\times 54{,}500$, and SNR improvement from 1.756 to
+  1.773 across the four-stage pipeline.
+\item A comprehensive preprocessing parameter sensitivity analysis evaluating NLM filter strength
+  ($h \in \{0.5, 1.0, 1.5, 2.0\}$), BHC polynomial degree ($d \in \{1, 2, 3, 5\}$), and ring artefact
+  filter radius ($r \in \{5, 10, 15, 25\}$ pixels), with quantitative SNR comparison across all
+  configurations.
+\item An automatic label generation strategy using two-stage Otsu thresholding with morphological
+  cleaning, enabling supervised U-Net training without manual
+  annotation~\citep{Yosifov2020,Otsu1979}.
+\item Preliminary empirical evidence that the 2D U-Net trained on automatic labels already
+  outperforms the Otsu label generator itself (validation Dice 0.68 vs.\ 0.38 after 20 epochs),
+  confirming that the model generalises beyond its noisy supervision signal.
+\item A documented, reproducible open-source implementation with thesis-ready analysis outputs
+  including intensity histograms, SNR plots, parameter tuning comparisons, patch extraction grids,
+  and augmentation validation figures.
+\item (Part II, answering RQ5) A completed validation of this pipeline on real PODFAM metal AM XCT
+  data, including a trained detector evaluated on a fully held-out sample and an additional
+  out-of-distribution sample.
+\item (Part II, answering RQ6) A documented and independently reproduced classical-thresholding
+  calibration failure mode, traced to processed-image mean intensity and confirmed on two separate
+  PODFAM samples rather than dismissed as a one-off anomaly.
+\end{itemize}

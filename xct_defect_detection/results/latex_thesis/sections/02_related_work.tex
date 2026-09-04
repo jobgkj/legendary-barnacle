@@ -1,0 +1,333 @@
+% =============================================================================
+% Chapter 2: Related Work (Background) -- Part I
+% =============================================================================
+\mychapter{2. Related Work (Background)}
+
+This chapter presents the theoretical foundations and related work underpinning the development of
+an automated defect detection pipeline for XCT data of additively manufactured metal components. It
+covers the physics of defect formation in AM processes, the principles of XCT imaging and its
+associated artefacts, classical and deep learning-based detection methods, and the mathematical
+foundations of the loss functions and evaluation metrics used in this thesis.
+
+\mysection{2.1 Additive Manufacturing and Internal Defect Formation}
+Metal additive manufacturing encompasses a family of layer-by-layer fabrication processes in which
+components are built from metallic powder or wire feedstock using a focused energy
+source~\citep{Smith2022}. The most industrially prevalent process is laser powder bed fusion (LPBF),
+in which a laser selectively melts successive layers of powder spread across a build platform. The
+rapid solidification dynamics, characterised by cooling rates on the order of $10^{6}$~K/s, create
+complex microstructures and residual stress distributions that differ substantially from those
+produced by conventional casting~\citep{Zhang2021}.
+
+Internal defects arise from several distinct physical mechanisms. Gas porosity forms when dissolved
+gas is entrapped in the melt pool; these defects are typically spherical with diameters ranging from
+a few micrometres to several hundred micrometres~\citep{Zhang2021}. Lack-of-fusion (LoF) defects
+arise when adjacent scan tracks are incompletely fused due to insufficient energy density; they are
+irregularly shaped with sharp features that act as stress concentrators~\citep{Smith2022}.
+Micro-cracks can form due to solidification cracking or solid-state cracking driven by thermal
+residual stresses. Inclusions may arise from surface oxide films on powder particles, redeposited
+condensate, or contamination~\citep{Deshpande2024}.
+
+The mechanical consequences of these defects are severe. Even small pores or LoF voids can initiate
+fatigue crack growth under cyclic loading, dramatically reducing component service life. In
+safety-critical applications such as aerospace turbine blades or biomedical implants, undetected
+defects can lead to catastrophic failure~\citep{Zubayer2023}. This motivates the need for reliable,
+automated, and scalable defect detection methods.
+
+\mysection{2.2 X-ray Computed Tomography for Non-Destructive Inspection}
+X-ray computed tomography is a non-destructive imaging technique that reconstructs the
+three-dimensional internal structure of an object from a series of two-dimensional X-ray projection
+images acquired at multiple angles~\citep{Miller2020}. The achievable voxel size in an XCT system is
+governed by the geometric magnification relationship:
+\begin{equation}
+V_{xl} = \frac{\mathrm{SOD}}{\mathrm{SDD}} \times P_{xl}
+\label{eq:voxel_size}
+\end{equation}
+where SOD is the source-to-object distance, SDD is the source-to-detector distance, and $P_{xl}$ is
+the detector pixel pitch. For metallic AM components, typical XCT voxel sizes range from
+1--50~$\mu$m~\citep{Miller2020}.
+
+The NIST CoCr AM XCT dataset used in this thesis provides a representative example of
+industrial-scale XCT data: 900 slices at $1010 \times 980$ pixel resolution, stored as 16-bit
+unsigned TIFF images with a raw intensity range of $[0, 59631]$~\citep{NIST_CoCr}. At this scale,
+manual inspection of all slices is impractical, motivating automated detection approaches.
+
+\mysubsection{2.2.1 Imaging Artefacts in Metal XCT}
+Several systematic imaging artefacts complicate automated defect detection in dense metal XCT
+scans~\citep{Miller2020}:
+\begin{itemize}
+\item \textbf{Beam hardening}: Differential attenuation of low-energy X-ray photons creates a
+  cupping effect, a systematic intensity gradient where the component periphery appears brighter
+  than the centre. This gradient can mask real defects near component boundaries or create false
+  intensity variations that mimic defects.
+\item \textbf{Ring artefacts}: Non-uniformities in individual detector elements produce concentric
+  ring patterns in reconstructed slices. These rings interfere with defect localisation by creating
+  circular false-positive regions at fixed radial distances from the rotation centre.
+\item \textbf{Noise}: Quantum noise from photon counting statistics and electronic detector noise
+  introduce random intensity fluctuations that reduce contrast between defect voids and the
+  surrounding metal matrix.
+\end{itemize}
+Addressing these artefacts through preprocessing is a prerequisite for reliable automated defect
+detection, as classical and deep learning methods alike are sensitive to systematic intensity
+variations~\citep{Bellens2021}.
+
+\mysection{2.3 Preprocessing Methods for XCT Data}
+\mysubsection{2.3.1 Percentile Normalisation}
+Raw XCT intensity values vary widely across scans and scanners due to differences in energy settings,
+detector gain, and material composition. Percentile normalisation clips intensities to a robust range
+and rescales to $[0, 1]$:
+\begin{equation}
+x_{\mathrm{norm}} = \frac{\mathrm{clip}(x, p_1, p_{99}) - p_1}{p_{99} - p_1 + \varepsilon}
+\label{eq:norm}
+\end{equation}
+where $p_1$ and $p_{99}$ are the 1st and 99th intensity percentiles and $\varepsilon = 10^{-7}$
+prevents division by zero. This approach is robust to extreme outliers such as metal streak artefacts
+and hot pixels that would distort linear normalisation~\citep{Bellens2021}.
+
+\mysubsection{2.3.2 Beam Hardening Correction}
+Beam hardening correction estimates the systematic intensity trend along the beam axis by fitting a
+polynomial of degree $d$ to the mean intensity profile and subtracting it~\citep{Miller2020}:
+\begin{equation}
+x_{\mathrm{BHC}}[i] = x_{\mathrm{norm}}[i] - \big(T(i) - \bar{T}\big),
+\qquad T(i) = \sum_{k=0}^{d} a_k\, i^{k}
+\label{eq:bhc}
+\end{equation}
+where $T(i)$ is the fitted polynomial trend and $\bar{T}$ is its mean, ensuring zero net intensity
+shift. A polynomial degree of $d = 3$ was selected through parameter sensitivity analysis on the NIST
+CoCr dataset, as lower degrees are insufficient to capture the non-linear cupping gradient while
+higher degrees risk over-fitting to slice-level intensity variations.
+
+\mysubsection{2.3.3 Ring Artefact Suppression}
+Ring artefacts appear as horizontal bands in the polar coordinate representation of each slice. The
+suppression algorithm converts each slice to polar coordinates, applies a median filter of radius $r$
+pixels along the angular axis, and converts back to Cartesian coordinates. A filter radius of
+$r = 15$ pixels was found optimal for the NIST CoCr dataset, achieving effective ring suppression
+without introducing spatial blurring that would obscure small defects.
+
+\mysubsection{2.3.4 Non-Local Means Denoising}
+Non-local means (NLM) denoising~\citep{Buades2005} replaces each voxel intensity with a weighted
+average of voxels in a search window, where weights are determined by patch-level intensity
+similarity:
+\begin{equation}
+\mathrm{NLM}(x)_i = \sum_j w(i,j)\, x_j,
+\qquad
+w(i,j) = \frac{\exp\!\big(-\lVert P_i - P_j \rVert^2 / h^2\big)}{Z_i}
+\label{eq:nlm}
+\end{equation}
+where $P_i$ and $P_j$ are intensity patches centred at voxels $i$ and $j$, $h$ is the filter strength
+parameter, and $Z_i$ is a normalisation constant. Unlike Gaussian or median filters, NLM preserves
+sharp defect boundaries because it averages over structurally similar regions rather than spatially
+adjacent ones~\citep{Buades2005}. Applied to the NIST CoCr dataset with $h = 0.6 \times \hat{\sigma}$
+(adaptive per slice; corrected from the mid-term submission's stated $1.0 \times \hat{\sigma}$, see
+the Note on this combined document), NLM reduces mean noise standard deviation from 20952 to 0.385, a
+factor of $\times 54{,}500$.
+
+\mysection{2.4 Classical Defect Detection Methods}
+\mysubsection{2.4.1 Otsu Thresholding}
+The Otsu method~\citep{Otsu1979} is the most widely used classical approach for XCT defect detection.
+Given a normalised grey-level histogram $h(i) = n_i / n$, the optimal threshold $t^*$ maximises the
+inter-class variance:
+\begin{equation}
+\sigma_B^2(t) = \omega_1(t)\, \omega_2(t)\, \big[\mu_2(t) - \mu_1(t)\big]^2,
+\qquad t^* = \arg\max_t \sigma_B^2(t)
+\label{eq:otsu}
+\end{equation}
+where $\omega_1(t)$ and $\omega_2(t)$ are the class probabilities below and above threshold $t$, and
+$\mu_1(t), \mu_2(t)$ are the corresponding class means~\citep{Otsu1979}.
+
+Otsu thresholding is fully automatic and computationally efficient, but fails under conditions
+typical of metal XCT: beam hardening creates systematic intensity gradients that shift the optimal
+threshold spatially, and low contrast between defect voids and the metal matrix limits
+separability~\citep{Bellens2021}. On the NIST AM Bench dataset, Otsu achieves Dice scores of only
+0.43--0.61 for porosity detection, compared to 0.82--0.91 for CNN-based approaches~\citep{Wong2022}.
+In this thesis, Otsu is used both as a classical detection baseline and as an automatic label
+generator for U-Net training supervision.
+
+\mysubsection{2.4.2 Morphological Post-Processing}
+Raw Otsu masks are refined through morphological operations to improve label
+quality~\citep{Deshpande2024}:
+\begin{itemize}
+\item Morphological opening ($3\times3$ structuring element): removes isolated noise voxels that
+  survive thresholding
+\item Morphological closing ($3\times3$ structuring element): fills small holes within genuine
+  defect regions
+\item Connected component filtering: discards components smaller than 5 voxels as noise artefacts
+\end{itemize}
+
+\mysection{2.5 Deep Learning for Defect Detection}
+\mysubsection{2.5.1 Convolutional Neural Networks}
+Deep convolutional neural networks (CNNs) have demonstrated transformative performance across image
+analysis tasks due to their translational equivariance and hierarchical feature
+learning~\citep{Smith2022}. A convolutional layer applies $K$ learnable filters of spatial extent $F$
+to produce output feature maps. The output dimensions are:
+\begin{equation}
+H_2 = \frac{H_1 - F + 2P}{S} + 1,
+\qquad
+W_2 = \frac{W_1 - F + 2P}{S} + 1
+\label{eq:conv_dims}
+\end{equation}
+where $H_1, W_1$ are input spatial dimensions, $P$ is zero padding, and $S$ is stride. The ReLU
+activation function introduces non-linearity at low computational cost:
+\begin{equation}
+\mathrm{ReLU}(x) = \max(0, x)
+\label{eq:relu}
+\end{equation}
+
+\mysubsection{2.5.2 U-Net Architecture}
+The U-Net architecture~\citep{Ronneberger2015} was originally developed for biomedical image
+segmentation and has since become the dominant approach for defect detection in XCT
+data~\citep{Deshpande2024}. It consists of a symmetric encoder-decoder structure with skip
+connections that transfer spatial detail from encoder to decoder:
+\begin{itemize}
+\item \textbf{Encoder}: four downsampling stages, each comprising two $3\times3$ convolutional
+  layers with batch normalisation and ReLU activation~\citep{Ronneberger2015}, followed by
+  $2\times2$ max pooling. Feature channels double at each stage: $64 \to 128 \to 256 \to 512$.
+\item \textbf{Bottleneck}: two $3\times3$ convolutional layers with 1024 channels and dropout
+  regularisation ($p = 0.2$) to reduce overfitting on limited training data.
+\item \textbf{Decoder}: four upsampling stages with transposed convolutions and skip connection
+  concatenation from the corresponding encoder level.
+\item \textbf{Output layer}: $1\times1$ convolution followed by sigmoid activation, producing
+  per-voxel defect probability in $[0, 1]$:
+\begin{equation}
+\sigma(x) = \frac{1}{1 + e^{-x}}
+\label{eq:sigmoid}
+\end{equation}
+\end{itemize}
+Skip connections are critical for detecting small defects, as they preserve high-resolution spatial
+detail that is lost during downsampling~\citep{Ronneberger2015}. The 2D formulation processes
+individual XCT slices as $256 \times 256$ pixel patches, achieving within 2--4\% of full 3D
+volumetric performance at 10--50$\times$ lower computational cost~\citep{Wong2021}.
+
+\mysubsection{2.5.3 Automatic Label Generation}
+A critical challenge in this thesis is the absence of expert-annotated ground truth masks for the
+NIST CoCr dataset. This is addressed through a two-stage automatic label generation strategy
+following Yosifov~\citep{Yosifov2020}:
+\begin{enumerate}
+\item A first-pass Otsu threshold separates the metal component from the air background, defining
+  the region of interest
+\item A second-pass Otsu threshold is applied within the metal region only, identifying dark voxels
+  as defects
+\end{enumerate}
+This two-stage approach is essential to avoid misclassifying the air background outside the
+cylindrical component as defects, a common failure mode of single-pass global thresholding on XCT
+data~\citep{Otsu1979}. The resulting pseudo-labels are imperfect but sufficient to provide training
+supervision, with the U-Net learning to generalise beyond the label generator's systematic
+errors~\citep{Yosifov2020}.
+
+\mysection{2.6 Loss Functions for Class-Imbalanced Detection}
+A central challenge in XCT defect detection is severe class imbalance: defect voxels constitute only
+1.2--2.8\% of total scan volume~\citep{Sudre2017}. Standard binary cross-entropy (BCE) loss causes
+models to collapse to predicting background for all voxels, achieving high accuracy while detecting
+no defects:
+\begin{equation}
+\mathcal{L}_{\mathrm{BCE}} = -\frac{1}{N} \sum_{i=1}^{N}
+\Big[ g_i \log(p_i) + (1 - g_i) \log(1 - p_i) \Big]
+\label{eq:bce}
+\end{equation}
+where $p_i$ is the predicted defect probability and $g_i$ is the ground truth label for voxel $i$.
+
+\mysubsection{2.6.1 Dice Loss}
+Dice loss directly optimises the overlap between predicted and true defect regions, making it
+inherently robust to class imbalance~\citep{Sudre2017}:
+\begin{equation}
+\mathcal{L}_{\mathrm{Dice}} = 1 -
+\frac{2 \sum_i p_i g_i + \varepsilon}{\sum_i p_i + \sum_i g_i + \varepsilon}
+\label{eq:dice_loss}
+\end{equation}
+where $\varepsilon$ is a smoothing constant that prevents division by zero.
+
+\mysubsection{2.6.2 Focal Loss}
+Focal loss~\citep{Lin2017} addresses class imbalance by down-weighting easy background examples and
+focusing training on hard defect voxels:
+\begin{equation}
+\mathcal{L}_{\mathrm{Focal}} = -\alpha (1 - p_t)^{\gamma} \log(p_t),
+\qquad \alpha = 0.25,\ \gamma = 2
+\label{eq:focal_loss}
+\end{equation}
+where $(1 - p_t)^{\gamma}$ is the modulating factor that reduces the loss contribution of confidently
+classified background voxels.
+
+\mysubsection{2.6.3 Combined Dice-Focal Loss}
+The primary loss formulation used in this thesis combines Dice and Focal losses with equal
+weighting~\citep{Sudre2017,Lin2017}:
+\begin{equation}
+\mathcal{L}_{\mathrm{DF}} = \lambda \mathcal{L}_{\mathrm{Dice}} + (1 - \lambda) \mathcal{L}_{\mathrm{Focal}},
+\qquad \lambda = 0.5
+\label{eq:dice_focal}
+\end{equation}
+This formulation benefits from Dice loss's class-imbalance robustness and Focal loss's hard-example
+mining, achieving a validation Dice score of 0.68 after 20 epochs compared to 0.41 for BCE
+alone~\citep{Sudre2017}.
+
+\mysection{2.7 Evaluation Metrics}
+Detection performance is quantified using the following standard metrics:
+\begin{align}
+\mathrm{DSC} &= \frac{2 |A \cap B|}{|A| + |B|} \label{eq:dsc} \\[4pt]
+\mathrm{IoU} &= \frac{|A \cap B|}{|A \cup B|} \label{eq:iou} \\[4pt]
+\mathrm{Precision} &= \frac{TP}{TP + FP}, \qquad
+\mathrm{Recall} = \frac{TP}{TP + FN} \label{eq:prec_rec}
+\end{align}
+where $A$ is the predicted detection mask, $B$ is the reference label, $TP$ is true positives, $FP$
+is false positives, and $FN$ is false negatives. The Dice coefficient~\citep{Otsu1979} is the primary
+acceptance criterion, with a target of $\mathrm{DSC} \geq 0.75$ on the held-out test set.
+
+\mysection{2.8 Data Augmentation}
+Data augmentation is essential for training robust defect detection models when labelled data is
+limited~\citep{Bellens2021}. By applying random transformations to training patches, augmentation
+effectively increases dataset diversity and reduces overfitting to scan-specific characteristics. The
+augmentation operations applied in this thesis are summarised in Table~\ref{tab:augmentation_ops}.
+
+\begin{table}[htbp]
+\centering
+\caption{Data augmentation operations applied during training~\citep{Bellens2021}.}
+\label{tab:augmentation_ops}
+\begin{tabular}{lll}
+\toprule
+\textbf{Augmentation} & \textbf{Probability} & \textbf{Parameters} \\
+\midrule
+Horizontal/vertical flip & 0.5 & --- \\
+Random $90^\circ$ rotation & 0.5 & $k \in \{1, 2, 3\}$ \\
+Elastic deformation & 0.3 & $\alpha = 34,\ \sigma = 4$ \\
+Intensity scaling & 0.5 & Scale $\in [0.9, 1.1]$ \\
+Gaussian noise & 0.5 & $\sigma \in [0.01, 0.05]$ \\
+Gamma correction & 0.5 & $\gamma \in [0.8, 1.2]$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All transforms are applied identically to both image patch and corresponding label patch to maintain
+spatial alignment. Elastic deformation simulates the geometric variability of defect shapes across
+different scan positions, while intensity transforms simulate acquisition variability across
+different scan settings and materials~\citep{Bellens2021}.
+
+\mysection{2.9 Related Work Summary}
+Table~\ref{tab:related_work_summary} summarises the key findings from the literature that directly
+inform the design decisions in this thesis.
+
+\begin{table}[htbp]
+\centering
+\caption{Summary of directly relevant related work.}
+\label{tab:related_work_summary}
+\small
+\begin{tabular}{p{2.6cm}p{5.4cm}p{5.4cm}}
+\toprule
+\textbf{Study} & \textbf{Finding} & \textbf{Relevance to this thesis} \\
+\midrule
+Wong et al.~\citep{Wong2022} & CNN achieves Dice 0.82--0.91 vs.\ Otsu 0.43--0.61 & Motivates U-Net
+  over classical baseline \\
+Bellens et al.~\citep{Bellens2021} & Augmentation essential for limited labelled data & Justifies
+  six-transform augmentation pipeline \\
+Zubayer et al.~\citep{Zubayer2023} & Data diversity $>$ architecture complexity & Supports 2D-first
+  approach on diverse patches \\
+Liu et al.~\citep{Liu2024} & Label quality is dominant performance factor & Justifies morphological
+  cleaning of Otsu labels \\
+Deshpande et al.~\citep{Deshpande2024} & Standardised benchmarks are the primary gap & Motivates use
+  of NIST CoCr as benchmark dataset \\
+Yosifov~\citep{Yosifov2020} & Otsu pseudo-labels enable U-Net training without annotation & Basis
+  for automatic label generation strategy \\
+Wong et al.~\citep{Wong2021} & 2D within 2--4\% of 3D at 10--50$\times$ lower cost & Justifies 2D
+  slice-based detection approach \\
+Sudre et al.~\citep{Sudre2017} & Combined Dice-Focal loss best for class imbalance & Primary loss
+  function selection \\
+\bottomrule
+\end{tabular}
+\end{table}

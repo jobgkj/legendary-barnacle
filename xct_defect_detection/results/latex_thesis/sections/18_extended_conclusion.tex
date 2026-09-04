@@ -1,0 +1,58 @@
+% =============================================================================
+% Chapter 18: Conclusion -- Part III (Extended Validation) and Overall Conclusion
+% =============================================================================
+\mychapter{18. Conclusion}
+
+This part revisited three design choices made without controlled comparison earlier in the thesis,
+loss function, preprocessing, and sample-boundary detection, and reported two further analyses,
+network interpretability and a strengthened external validation, on the same PODFAM pipeline validated
+in Part II. A controlled four-way loss-function comparison found BCE, not the combined Dice-Focal
+formulation stated as primary in Part II, achieves the strongest validation Dice and IoU, and further
+established that Part II's own headline generalisation result was already trained with BCE, correcting
+rather than merely refining Part II's stated choice. A held-out test sample, evaluated across every
+configuration tested in this part, consistently scored far below its corresponding validation sample,
+0.12--0.21 Dice against 0.70--0.73, replicating, on an independent split and set of configurations, the
+same pattern Part II first reported for its own single trained model (Section~10.3). This
+generalisation gap, not any single preprocessing or masking result, is this part's central finding: it
+is a property of how few distinct samples this pipeline has to work with, not of any one training run,
+and it remains the pipeline's primary open problem going into any future work on this dataset.
+
+Within that constraint, beam-hardening/ring-artefact correction and a shape-agnostic replacement for
+the circular sample-boundary assumption each moved held-out test Dice in the right direction (0.1218
+$\to$ 0.1693 $\to$ 0.2119), evidence that these specific engineering changes improve genuine
+generalisation rather than only fitting the validation sample more closely. The shape-aware boundary
+method also corrected a two-order-of-magnitude artefact in sample\_06's reported defect fraction
+(2.92\% $\to$ 0.030\%) and recovered the same external-validation accuracy as the circular mask it
+replaced (Table~\ref{tab:mask_r_comparison}) while removing an assumption already known not to hold for
+two of the seven PODFAM samples. A parallel investigation of Canny edge detection as a further
+alternative is reported as a negative result: it independently corroborates the circular-fit method on
+samples where both apply, but exhibits a confirmed, data-driven failure mode on the non-circular
+samples that the adopted shape-aware method does not, and is documented here specifically so that
+choice is not revisited without this evidence.
+
+A gradient-based attribution analysis of the trained detector, run on the verified BCE checkpoint,
+found that the three encoder blocks together account for roughly two-thirds of the network's
+attributed defect-discriminating signal, with the block closest to the output the least influential of
+all nine, offering a concrete, evidence-based direction (strengthening early-encoder feature extraction
+or its skip connections) for future architecture work on this task. Separately, checking Kim et al.'s
+own reference porosity values against their paper's stated methodology found they were themselves
+cross-validated against an independent gravimetric method, strengthening the interpretation of this
+thesis's $r = 0.995$ external-validation result as agreement with an already physically-grounded
+reference rather than an XCT-internal comparison alone. A further, still-unconfirmed observation, that
+the two NIST samples this thesis excludes from training were scanned at a substantially finer voxel
+size than the rest of the set, is reported as a plausible explanation worth testing directly in any
+continuation of this work, rather than as a settled finding.
+
+Taken together with Parts I and II, this document now covers method development on a public benchmark
+(NIST CoCr, Part I), full-volume classical-versus-deep-learning validation on real industrial
+process-monitoring data (PODFAM, Part II), and a controlled revisiting of that validation's own design
+choices alongside two further, independent lines of evidence, interpretability and external-reference
+verification (Part III). The overall picture that emerges is consistent across all three parts: the
+pipeline's classical thresholding stage, particularly Bernsen local adaptive thresholding, is validated
+against independently published, physically-grounded reference data with high confidence; the trained
+detector built on top of it produces plausible, well-motivated predictions within the sample or samples
+it was trained and validated on, but its performance on data it has never seen falls far short of this
+thesis's stated acceptance criteria in every configuration tested; and every major result in this
+document, favourable or not, was reached only after an explicit, reported cross-check, itself a
+recurring finding of this work, that a classical method's or a trained model's output looking plausible
+in isolation is not sufficient grounds to trust it without independent verification.

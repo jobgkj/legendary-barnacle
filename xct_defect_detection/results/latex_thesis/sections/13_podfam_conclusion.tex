@@ -1,0 +1,24 @@
+% =============================================================================
+% Chapter 13: Conclusion -- Part II
+% =============================================================================
+\mychapter{13. Conclusion}
+
+This part validated the thesis's automated XCT defect-detection pipeline on real PODFAM metal AM
+samples, independently of the NIST CoCr benchmark used in Part I. Full-volume comparison confirmed,
+on new data, the literature's finding that Bernsen local thresholding outperforms Otsu and Yen for AM
+porosity segmentation, and additionally surfaced and diagnosed a specific calibration failure mode in
+Bernsen's automatic contrast-threshold estimation, a failure mode subsequently reproduced, at a
+different severity, on a sixth sample processed after the original validation. A 2D U-Net trained on
+Bernsen pseudo-labels, using a defect-content-ranked rather than random sample assignment, achieved a
+best validation Dice of 0.600 and, on a fully held-out sample, predicted a total defect volume within
+0.002 percentage points of the pseudo-label's own value, a result that argues for reporting
+volume-level agreement alongside pixel-level overlap metrics in future evaluation of this pipeline.
+The validation set's small size and the absence of independently verified ground truth are stated
+explicitly as limits on how far these results can be generalised, consistent with the standard set in
+Part I's own treatment of its NIST-phase pseudo-labels.
+
+Taken together with Part I, this document now covers method development on a public benchmark (NIST
+CoCr), full-volume classical-vs-deep-learning validation on real industrial process-monitoring data
+(PODFAM, five core samples), and an out-of-distribution generalisation check on a sixth sample that
+both supported the trained detector's usefulness and surfaced a reproducible, previously undocumented
+failure mode in one of its classical comparison baselines.

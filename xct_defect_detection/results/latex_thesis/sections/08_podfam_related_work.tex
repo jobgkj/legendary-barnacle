@@ -1,0 +1,57 @@
+% =============================================================================
+% Chapter 8: Related Work -- Part II
+% =============================================================================
+\mychapter{8. Related Work}
+
+\mysection{8.1 Comparative Studies of Classical Thresholding for AM Porosity}
+Otsu's method~\citep{Otsu1979} is the most commonly used automatic global threshold for XCT porosity
+segmentation, but is known to perform poorly on metal AM data where beam-hardening and non-uniform
+solid-phase intensity reduce the separability of pore and matrix greyscale
+distributions~\citep{Kim2017}. Kim et al.~\citep{Kim2017} compared Bernsen local adaptive
+thresholding against Otsu and Yen global thresholding on cobalt-chrome AM parts and found that Otsu
+failed to preserve small pores near sample edges, that Yen produced inaccurate pore sizing due to
+non-uniform edge intensity, and that Bernsen local thresholding gave the most reliable segmentation
+across both edge and low-contrast regions. This finding directly motivated the choice of Bernsen,
+rather than Otsu, as the primary pseudo-labelling method for the PODFAM validation reported in this
+part.
+
+A NIST standard-method study~\citep{NIST_Standard} proposed a reproducible microCT-based
+porosity-analysis procedure that explicitly separates internal defects from surface-connected
+artefacts by eroding a small margin (on the order of a few voxels) below the detected sample surface
+before thresholding, a body-masking step adopted in this work's own sample-boundary detection
+(Section~9.2).
+
+A 2025 inter-operator uncertainty study~\citep{AppliedSciences2025} quantified how much porosity
+measurement varies purely due to segmentation and analysis choices, independent of scan quality,
+across aluminium, titanium, and nickel-chromium AM parts made by three different processes. Relative
+standard uncertainty of up to 38\% was reported for laser powder-bed-fusion parts, and 70--89\% for a
+low-porosity part produced by directed energy deposition, purely from differences in operator/method
+choice. This result is corroborated directly by the present part's own full-volume comparison
+(Section~10.1), where Otsu, Yen, and Bernsen disagree on defect fraction by one to three orders of
+magnitude on the same underlying data.
+
+\mysection{8.2 Deep Learning for AM Porosity Segmentation}
+Convolutional segmentation networks, and the U-Net encoder-decoder architecture with skip
+connections in particular~\citep{Ronneberger2015}, have been reported to substantially outperform
+classical thresholding on AM XCT porosity data, with one comparative study reporting Dice scores
+above 0.85 for U-Net and FCDenseNet against approximately 0.40 for thresholding on low-porosity
+samples~\citep{Wong2022}. More recent work has moved toward fully volumetric 3D segmentation using
+nnU-Net-style architectures with multi-scale post-processing~\citep{ScienceDirect2026}, toward
+physics-informed models that incorporate an X-ray attenuation term directly into the
+network~\citep{Arxiv2024}, and toward zero-shot or promptable segmentation using foundation models
+such as Segment Anything, applied without any AM-specific training data~\citep{npj2025}. This part's
+own contribution sits earlier in that progression: a 2D U-Net trained on classically-derived
+pseudo-labels, evaluated specifically for whether it generalises beyond the pseudo-label method it
+was trained on, a question distinct from, and prerequisite to, adopting any of the more complex
+architectures above.
+
+\mysection{8.3 Summary and Positioning}
+Three findings from the literature reviewed above are used directly in this part's methodology and
+interpretation of results: (i) Bernsen thresholding is the more reliable of the three classical
+methods evaluated here for AM porosity, and is therefore used as the pseudo-label source rather than
+Otsu~\citep{Kim2017}; (ii) inter-method and inter-operator disagreement in AM porosity measurement is
+a documented, quantified phenomenon and not evidence of implementation error, which reframes the
+large disagreements reported in Section~10.1 as an expected, citable result rather than an
+anomaly~\citep{AppliedSciences2025}; and (iii) deep-learning segmentation is reported to
+substantially outperform thresholding in prior work~\citep{Wong2022}, against which this part's own
+detector is compared directly.

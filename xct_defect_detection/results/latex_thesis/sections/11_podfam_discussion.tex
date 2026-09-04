@@ -1,0 +1,34 @@
+% =============================================================================
+% Chapter 11: Discussion -- Part II
+% =============================================================================
+\mychapter{11. Discussion}
+
+Three results from this validation phase are directly relevant to the thesis's research questions on
+preprocessing, label generation, and detection performance under class imbalance.
+
+First, the choice of pseudo-label method materially changes the reported result, not just its
+magnitude. Section~8.1's literature already predicted that Bernsen would outperform Otsu and Yen on
+AM XCT data~\citep{Kim2017}; this part's full-volume results confirm that prediction on an
+independent dataset, and additionally show that the failure modes are not benign, Yen's
+over-segmentation and Bernsen's DCT-calibration failure (Section~9.5, reproduced in Section~10.5)
+each produce numbers that look superficially plausible (a percentage between 0 and 100) but are
+physically wrong by one to two orders of magnitude. Any thesis reporting AM porosity from a single
+thresholding method without a comparison of this kind risks reporting a number that reflects a
+method's failure mode rather than the part's real condition.
+
+Second, the sample-selection methodology (Section~9.4) is itself a result worth reporting, not only a
+procedural detail. With as few as three usable samples, whichever sample is assigned to the training
+role determines what the model can possibly learn; a random assignment is not a neutral default when
+the sample pool is this small; a deterministic, defect-content-ranked assignment is both more
+defensible and, in this case, produced a materially better and more informative result than the
+random alternative.
+
+Third, the held-out test result (Section~10.3) illustrates a general limitation of Dice/IoU as the
+sole reported metric for imbalanced segmentation: on a sample with very low true defect content, a
+small number of false positives can dominate the denominator and produce a low score even when the
+detector's overall estimate of defect volume is accurate. Reporting the volume-fraction agreement
+alongside the pixel-level metrics avoids over- or under-stating the detector's real usefulness in
+either direction. The sample\_07 extension (Section~10.5) reinforces this point from a different
+angle: three independent classical methods agreeing with each other (17.6--19.4\%) was not, on
+inspection, corroboration of a real result, it was three methods sharing the same upstream
+sensitivity to processed-image mean intensity.

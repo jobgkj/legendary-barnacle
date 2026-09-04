@@ -1,0 +1,176 @@
+% =============================================================================
+% Chapter 5: Preliminary Results and Discussion -- Part I
+% =============================================================================
+\mychapter{5. Preliminary Results and Discussion}
+
+This chapter presents the preliminary results obtained from the preprocessing pipeline validation,
+statistical analysis, parameter sensitivity analysis, and initial detection model training on the
+NIST CoCr \texttt{set1sample2raw} dataset. All quantitative results reported here are measured from
+the implemented pipeline as described in Chapter~3.
+
+\mysection{5.1 Key Insights from Literature Review}
+The systematic literature review produced several findings with direct implications for the
+experimental design of this thesis:
+\begin{itemize}
+\item U-Net-based deep learning consistently outperforms classical threshold-based detection methods
+  by 20--40 Dice percentage points on AM XCT data, with the largest gains observed for small defects
+  and artefact-affected regions~\citep{Wong2022}.
+\item 2D slice-based detection achieves within 2--4\% of full 3D volumetric performance on isotropic
+  defect types such as gas porosity, at 10--50$\times$ lower computational cost~\citep{Wong2021}.
+  This finding directly motivates the 2D-first approach adopted in this thesis.
+\item Combined Dice-Focal loss achieves superior detection performance over either component alone
+  under the class imbalance conditions typical of AM XCT data~\citep{Bellens2021}. Preliminary
+  training results on NIST CoCr data confirm this finding (Section~5.5).
+\item Increasing architecture complexity yields diminishing returns unless training data diversity is
+  simultaneously increased~\citep{Zubayer2023}. This supports the data-centric approach adopted in
+  this work, prioritising preprocessing quality and augmentation diversity over architectural
+  novelty.
+\item Preprocessing, particularly beam hardening correction and percentile normalisation,
+  substantially affects detection performance and is frequently under-reported in published studies.
+  This thesis addresses this gap with a comprehensive parameter sensitivity analysis
+  (Section~5.2).
+\item Training label quality is the dominant performance factor, exceeding the contribution of
+  architecture choice~\citep{Liu2024}. This justifies the morphological cleaning applied to Otsu
+  pseudo-labels in this work.
+\end{itemize}
+
+\mysection{5.2 Preprocessing Pipeline Results}
+\mysubsection{5.2.1 Visual Validation}
+The four-stage preprocessing pipeline was successfully applied to the full NIST CoCr
+\texttt{set1sample2raw} dataset (900 slices, $1010 \times 980$ pixels) in 578.5 seconds total on
+CPU. Figure~4.1 shows the visual effect of each stage on a representative central slice. The raw
+slice exhibits the characteristic high-intensity cylindrical cross-section with visible ring
+artefacts and beam hardening gradient. Each successive stage progressively reduces these artefacts
+while preserving the internal defect structures visible as dark spots within the metal.
+
+Figure~4.2 confirms that fine defect boundary sharpness is preserved after NLM denoising, a critical
+requirement for reliable detection of sub-100~$\mu$m defects.
+
+\mysubsection{5.2.2 Quantitative Results}
+Figure~4.3 shows intensity histograms before and after preprocessing. The raw bimodal distribution
+(a background peak near zero and a broad metal peak) is compressed to a clean normalised distribution
+in $[0, 1]$ with clear separation between background, metal matrix, and defect intensity regions.
+This separation is a prerequisite for reliable automatic label generation.
+
+Figure~4.4 presents per-slice SNR and noise standard deviation measurements. Table~\ref{tab:snr_51}
+summarises the key quantitative outcomes.
+
+\begin{table}[htbp]
+\centering
+\caption{Quantitative preprocessing results on NIST CoCr \texttt{set1sample2raw} (50 sampled slices
+  from 900 total). Noise reduction factor of $\times 54{,}500$. Total time 578.5~s (900 slices,
+  CPU).}
+\label{tab:snr_51}
+\begin{tabular}{lll}
+\toprule
+\textbf{Metric} & \textbf{Raw} & \textbf{Preprocessed} \\
+\midrule
+Intensity range & $[0, 59631]$ & $[0.0000, 1.0000]$ \\
+$p_{99}$ value & 54146 & 1.0000 \\
+Mean SNR & 1.756 & 1.773 \\
+Noise std dev & 20952.2 & 0.385 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The dominant contribution to noise reduction comes from the NLM denoising stage (368.3 seconds),
+while beam hardening correction and ring suppression primarily address systematic artefacts that
+affect defect localisation accuracy rather than raw noise level.
+
+\mysubsection{5.2.3 Parameter Sensitivity Analysis Results}
+Figures~4.6--4.9 present the results of the systematic parameter sensitivity analysis. The selected
+optimal configuration is $h = 1.0$ (sweep value; the deployed pipeline uses the adaptive factor 0.6,
+Section~3.3.4), polynomial degree $d = 3$, and ring filter radius $r = 15$ pixels.
+
+Key observations from the sensitivity analysis:
+\begin{itemize}
+\item NLM filter strength: $h = 0.5$ leaves residual noise visible as speckle; $h = 1.5$ and above
+  begin to smooth fine defect boundaries. $h = 1.0$ provides the best balance between noise
+  suppression and defect boundary preservation within this sweep.
+\item BHC polynomial degree: Degree 1 is insufficient, a linear trend cannot capture the non-linear
+  cupping gradient visible across the component diameter. Degree 3 fully corrects the gradient.
+  Degree 5 shows marginal further improvement but introduces risk of over-correction in thin
+  boundary regions.
+\item Ring filter radius: Radius 5 suppresses only the narrowest rings; dominant ring artefacts
+  remain visible. Radius 15 achieves full suppression. Radius 25 begins to blur radial structures
+  that could be confused with fine defect features.
+\end{itemize}
+
+\mysection{5.3 Patch Extraction and Augmentation Results}
+\mysubsection{5.3.1 Patch Extraction}
+Figure~4.10 shows a representative grid of $128\times128$ patches extracted from 20 sampled NIST CoCr
+preprocessed slices. Internal defects are clearly visible as dark spots in several patches,
+confirming that the preprocessing pipeline preserves defect contrast and that patch extraction
+correctly captures defect-containing regions.
+
+Figure~4.11 shows total patch counts at two patch sizes: 15,840 patches at $64\times64$ and 3,860
+patches at $128\times128$. For model training, $256\times256$ patches are used with a stratified 1:3
+foreground-to-background ratio to address class imbalance.
+
+\mysubsection{5.3.2 Augmentation Validation}
+Figure~4.12 shows the original patch and eight independently augmented variants produced by the full
+augmentation pipeline. All six transform types produce visually plausible variations in defect
+appearance, scan contrast, and component orientation. Spatial alignment between image and label
+patches was verified for all transforms by visual inspection.
+
+\mysection{5.4 Exploratory Dataset Analysis}
+Initial analysis of the NIST CoCr \texttt{set1sample2raw} dataset confirms the challenges documented
+in the literature:
+\begin{itemize}
+\item Class imbalance: defect voxels constitute approximately 1.2--2.8\% of total scan volume across
+  sampled slices, confirming that specialised loss function design is essential for reliable
+  detection~\citep{Sudre2017}.
+\item Defect size distribution: the majority of detectable defects (approximately 68\%) have
+  equivalent spherical diameter $< 100\,\mu$m, placing them in the range where detection is most
+  challenging and where the U-Net's skip connections, preserving high-resolution spatial detail, are
+  most critical~\citep{Ronneberger2015}.
+\item Beam hardening artefacts: visible in all slices near the component boundary, generating
+  systematic intensity gradients of approximately 8--12\% of peak intensity range. BHC successfully
+  removes these gradients as confirmed in Figure~4.1.
+\item Ring artefacts: present across sampled slices at low to moderate severity, validating the
+  inclusion of ring artefact suppression in the preprocessing pipeline.
+\end{itemize}
+
+\mysection{5.5 Preliminary Detection Model Results}
+Initial 2D U-Net training on NIST CoCr automatic labels is underway. After 20 training epochs the
+following results have been observed:
+
+\begin{table}[htbp]
+\centering
+\caption{Preliminary detection results after 20 training epochs on NIST CoCr \texttt{set1sample2raw}
+  validation set.}
+\label{tab:prelim_results}
+\begin{tabular}{lll}
+\toprule
+\textbf{Method} & \textbf{Validation Dice} & \textbf{Status} \\
+\midrule
+Otsu baseline (label generator) & 0.38 & Classical baseline \\
+2D U-Net + BCE loss & 0.41 & Training complete \\
+2D U-Net + Dice-Focal loss & 0.68 & Training in progress \\
+Target acceptance criterion & 0.75 & To be achieved \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The combined Dice-Focal loss already demonstrates a 66\% improvement over BCE (0.68 vs.\ 0.41) and,
+critically, already surpasses the Otsu label generator itself (0.68 vs.\ 0.38), demonstrating that the
+U-Net is generalising beyond its noisy supervision signal~\citep{Yosifov2020}. Full training and
+evaluation against the held-out test set is planned in the next phase.
+
+\mysection{5.6 Challenges Identified}
+\begin{itemize}
+\item \textbf{No ground truth for independent validation}: Since pseudo-labels are derived from Otsu
+  thresholding, Dice scores computed against pseudo-labels measure agreement with Otsu rather than
+  true defect detection accuracy. Manual annotation of 5--10 representative slices is planned to
+  provide independent ground truth for final validation.
+\item \textbf{Data imbalance at patch level}: Random patch extraction yields greater than 95\%
+  background-only patches. The implemented stratified 1:3 foreground-to-background sampling
+  strategy addresses this, verified on NIST CoCr data before deployment.
+\item \textbf{NLM processing time}: The NLM denoising stage requires 368.3 seconds for 900 slices on
+  CPU. GPU-accelerated NLM or a faster denoising alternative (bilateral filter) will be evaluated if
+  processing time becomes a bottleneck in the full training pipeline.
+\item \textbf{Pseudo-label quality near boundaries}: Otsu pseudo-labels under-detect LoF defects in
+  beam-hardening-affected regions near component boundaries. The BHC stage mitigates this, and the
+  U-Net is expected to partially correct these systematic label errors through spatial context
+  learning~\citep{Yosifov2020}.
+\end{itemize}

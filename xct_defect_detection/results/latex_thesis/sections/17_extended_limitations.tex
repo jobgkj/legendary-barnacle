@@ -1,0 +1,63 @@
+% =============================================================================
+% Chapter 17: Limitations -- Part III (Extended Validation)
+% =============================================================================
+\mychapter{17. Limitations --- Extended Validation}
+
+This section states the limitations specific to the work reported in Sections~14--16. It supersedes or
+narrows two of Part II's own stated limitations (Section~12) for the specific samples and checkpoints
+this part covers; those two points are noted explicitly below rather than left for the reader to
+reconcile.
+
+\begin{itemize}
+\item \textbf{The generalisation gap remains unresolved, not just measured.} This part characterises
+  the gap between validation and held-out test performance across several configurations
+  (Section~15.2) but does not close it. The highest-leverage untried fix, retraining on a larger,
+  rotating pool of samples rather than the fixed four-sample, single-role split used throughout this
+  thesis, was identified but not attempted within this work's scope.
+\item \textbf{Every configuration in this part shares the same single held-out test sample},
+  sample\_01. A generalisation-gap finding replicated across preprocessing and loss-function
+  variations on one held-out sample is stronger evidence than a single run, but it is still one sample;
+  it cannot rule out that a different held-out sample would show a smaller, or larger, gap.
+\item \textbf{The shape-aware boundary method's transition-slice fallback (Section~14.5) is not fully
+  hardened.} The per-slice adaptive-Otsu fallback triggered on transition slices near a volume's top or
+  bottom can itself overcorrect on very-high-porosity content, sample\_05 at $\sim$72\% porosity, or on
+  some of sample\_06's own transition slices, producing an implausibly low coverage estimate (1--5\%)
+  in the opposite direction from the failure it was designed to catch. The full seven-sample production
+  run completed with no unresolved failures under the current hybrid logic, but this is an
+  asymmetric, only partially closed edge case rather than a solved one.
+\item \textbf{The conv-block attribution result (Section~15.6) uses one representative crop and one
+  attribution method.} It is directional evidence about where the trained network's decision-relevant
+  signal concentrates, not a validated architectural claim; a different crop, sample, or attribution
+  method could in principle produce a different relative ranking among the nine blocks.
+\item \textbf{The gravimetric cross-check strengthening the external-validation claim
+  (Sections~14.9, 15.7) is reported at the level of Kim et al.'s paper as a whole, not confirmed
+  per sample.} Their gravimetric comparison covers specific samples in their own numbering; it has not
+  been independently verified here that every one of the five NIST samples used in this thesis's own
+  $r = 0.995$ correlation individually received that exact cross-check, as opposed to being reported
+  as part of a broader dataset characterisation.
+\item \textbf{The NIST voxel-size finding (Section~14.10) is an unconfirmed hypothesis, not a
+  demonstrated cause.} That samples 3 and 5 were scanned at a substantially finer resolution than the
+  other NIST samples, and are also the two samples this thesis excludes from training, is reported as a
+  plausible explanation worth investigating, not as a verified causal link; this part did not test the
+  two excluded samples' actual field-of-view dimensions or intensity statistics against this
+  hypothesis.
+\item \textbf{This part's own PODFAM defect-fraction figures for sample\_01--05
+  (Table~\ref{tab:podfam_shape_aware} discussion, Section~15.3) come from a later, independently re-run
+  pipeline pass and differ numerically from Section~10.1's Table~\ref{tab:podfam_classical} figures for
+  the same samples.} Both are genuine outputs of the working pipeline at different points in this
+  work; they are reported here as such, rather than reconciled into a single authoritative number,
+  consistent with this thesis's practice elsewhere of not silently merging figures from different runs.
+\item \textbf{Supersedes Part II, Section~12, PIXEL\_SIZE\_UM bullet, for sample\_06/07 specifically:}
+  the physical voxel size for these two samples is now known (12.001~\textmu m/px,
+  Section~14.10), resolving Part II's stated uncertainty for this pair. It remains unresolved for
+  sample\_01--05 (see the NIST voxel-size figures above, which come from the dataset's published
+  documentation rather than an in-house measurement) and \texttt{config.py}'s \param{PIXEL\_SIZE\_UM}
+  constant itself has not been updated to reflect either figure, so any pipeline output still expressed
+  in that constant's units remains uncalibrated.
+\item \textbf{Narrows Part II, Section~12, sample\_07-single-data-point bullet:} sample\_07 is now
+  supported by a second, independent line of evidence beyond the original single inference-only check,
+  the background-masking fix's internal consistency check (Section~15.4) and the shape-aware boundary
+  method's corrected, visually-confirmed defect fraction (Section~15.3), but it still has no
+  ground-truth role and no retraining took place; Part II's original caveat that its results are a
+  plausibility check rather than a validated accuracy figure still applies.
+\end{itemize}

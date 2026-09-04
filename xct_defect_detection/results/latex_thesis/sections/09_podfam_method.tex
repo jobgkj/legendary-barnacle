@@ -1,0 +1,98 @@
+% =============================================================================
+% Chapter 9: Method -- Part II
+% =============================================================================
+\mychapter{9. Method}
+
+\mysection{9.1 PODFAM Sample Set}
+Five XCT-scanned metal AM samples were used for the core validation: sample\_01, sample\_02,
+sample\_03, sample\_04, and sample\_05, comprising 900 slices each (sample\_04: 749 slices) at
+approximately $1010\times980$--988 pixel resolution, 16-bit unsigned TIFF. As with the Part I
+dataset, no expert-annotated ground truth is available for any PODFAM sample. Section~10.5
+additionally reports on sample\_07 (1,473 slices, $1143\times1215$ pixels), acquired and processed
+after this core validation.
+
+All PODFAM samples are Ti-6Al-4V, manufactured by laser powder bed fusion (PBF-LB) on an Aconity Two
+machine. Post-build, the samples were characterised by X-ray computed tomography on a Waygate
+v\textbar tome\textbar x M~240 XCT system. Material and process details were not part of the original
+mid-term submission and are added here as they were not required for, and do not affect, the
+preprocessing, pseudo-labelling, or detector-training methodology described in Sections~9.2--9.7,
+which operate purely on the reconstructed greyscale volumes; they are recorded here for completeness
+and for anyone reproducing this validation on a different Ti-6Al-4V PBF-LB dataset to judge
+comparability.
+
+\mysection{9.2 Preprocessing}
+Each slice is processed independently by (i) a $3\times3$ median filter to suppress speckle noise,
+followed by (ii) non-local means (NLM) denoising with adaptive filter strength
+$h = 0.6 \times \hat{\sigma}$, where $\hat{\sigma}$ is the per-slice estimated noise standard
+deviation, and (iii) normalisation to an 8-bit intensity range. This is a narrower pipeline than the
+four-stage Part I pipeline: beam-hardening correction and polar-coordinate ring-artefact suppression
+were not applied to the PODFAM data in this validation phase, since PODFAM's images did not exhibit
+those particular artefacts as strongly and the analysis prioritised comparability across the
+classical-thresholding and U-Net stages over full artefact removal.
+
+\mysection{9.3 Sample-Boundary Detection and Pseudo-Label Generation}
+A circular sample-boundary mask is fitted once per volume by averaging the detected circle centre and
+radius across five evenly-spaced slices, then eroding the resulting disc by a small margin (5~px) to
+exclude partial-volume edge pixels, following the same rationale as the Part I standard-method
+erosion step~\citep{NIST_Standard}. All three thresholding methods (Otsu, Yen, Bernsen) are then
+computed only within this interior region, preventing background air from being misclassified as
+defect. Bernsen's local contrast threshold (DCT) is computed automatically per image from the
+estimated local noise standard deviation of the solid phase, following Kim et
+al.~\citep{Kim2017}; Bernsen is used as the primary pseudo-label source for U-Net training, motivated
+directly by the comparative finding reported in Section~8.1.
+
+\mysection{9.4 Defect-Content-Ranked Sample Selection}
+Rather than assigning samples to train/validation/test roles alphabetically or at random, every
+sample's mean Bernsen defect fraction is computed over its full volume and samples are ranked
+most-voids-first. The three samples retained for this validation phase were, in ranked order,
+sample\_02 (7.586\% defect fraction), sample\_04 (1.994\%), and sample\_01 (0.043\%); sample\_03 was
+excluded as near-empty (0.0004\%, effectively uninformative for training), and sample\_05 was
+excluded for the reason given below.
+
+The most defect-rich sample was assigned to training, the next to validation, and the least to test,
+deterministically, rather than via a random index-based split. This choice is methodologically
+significant: an earlier iteration of this pipeline used a fixed-seed random split over the same three
+ranked samples, which by chance assigned the single most defect-rich sample to the test role rather
+than training. The resulting model, trained on a far less informative sample, could not learn the
+defect pattern that was concentrated almost entirely in the sample it never saw, producing a held-out
+Dice score below 0.15 for reasons unrelated to model capacity or training procedure. This is reported
+here as a methodological finding in its own right: with only three usable samples, split assignment
+must be deliberate rather than left to a fixed random seed.
+
+\mysection{9.5 A Documented Pseudo-Label Failure Mode}
+During full-volume evaluation (Section~10.1), sample\_05 was found to have an implausible Bernsen
+defect fraction of 52.8\%, physically inconsistent with a metal AM part, and roughly three orders of
+magnitude above every other sample's Bernsen result. Investigation traced this to Bernsen's automatic
+contrast-threshold (DCT) estimation: for this dataset, the estimated DCT (329--520) is far above the
+value the underlying method's own reference reports as typical (approximately 15)~\citep{Kim2017}.
+An inflated DCT routes almost every pixel into Bernsen's low-contrast fallback branch, which
+classifies purely by a fixed intensity threshold at 128. Samples whose preprocessed images average
+brighter than 128 are still classified approximately correctly by this fallback; sample\_05 averages
+79.9, substantially darker, so the fallback misclassifies most of the genuinely solid material as
+void. Otsu and Yen independently agree with Bernsen's implausible result on this specific sample
+(51.7\% and 47.9\% respectively), which is consistent with a shared upstream cause (the sample's
+unusually low mean intensity) rather than three independent confirmations of real porosity.
+sample\_05 was excluded from training and from the ranked comparison via an automatic guard that
+flags any sample exceeding a 10\% defect-fraction threshold, a level far above plausible AM porosity,
+for manual review rather than allowing it to silently dominate a ranking or a training run.
+
+\mysection{9.6 Detection Model and Training Configuration}
+A 2D U-Net (approximately 31.0 million trainable parameters; four encoder/decoder stages, feature
+channels $64\to128\to256\to512$, bottleneck dropout $p = 0.2$) is trained on $256\times256$ pixel
+patches (stride 128, 50\% overlap) drawn from 80 evenly-spaced slices per training volume, using
+stratified 1:3 foreground-to-background patch sampling to address the severe class imbalance
+inherent to porosity data. Patches are shuffled at the slice level rather than individually during
+training, all patches from a visited slice are drawn together before moving to the next, to keep
+memory-mapped volume access efficient on constrained hardware without sacrificing epoch-level
+randomisation. The combined Dice-Focal loss ($\lambda = 0.5$, $\alpha = 0.25$, $\gamma = 2.0$) is
+used, with Adam optimisation (learning rate $4\times10^{-5}$), early stopping (patience 10 epochs),
+and best-checkpoint selection by validation Dice.
+
+\mysection{9.7 Evaluation Metrics}
+Detection performance is reported using the Dice coefficient, Intersection-over-Union (IoU),
+precision, and recall, computed at the pixel level against the Bernsen pseudo-label. Full-volume
+defect statistics (defect fraction, pore count, mean pore area, mean equivalent diameter) are
+computed by pooling per-slice connected-component analysis across every slice in a volume, rather
+than from a single representative slice, for both the classical methods and the trained detector's
+predictions, ensuring the classical and deep-learning results in Section~10 are directly comparable
+rather than mixing single-slice and full-volume statistics.

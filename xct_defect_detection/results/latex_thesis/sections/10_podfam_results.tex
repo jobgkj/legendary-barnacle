@@ -1,0 +1,240 @@
+% =============================================================================
+% Chapter 10: Results -- Part II
+% =============================================================================
+\mychapter{10. Results}
+
+\mysection{10.1 Full-Volume Classical Thresholding Comparison}
+Table~\ref{tab:podfam_classical} reports defect fraction, pore count, and mean equivalent pore
+diameter for Otsu, Yen, and Bernsen thresholding, computed over the complete slice volume of every
+core-validation PODFAM sample (749--900 slices).
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Full-volume classical thresholding comparison, all five core-validation PODFAM samples.
+  sample\_03 and sample\_05 excluded from training (Sections~9.4, 9.5). Pixel units, see Section~12
+  on voxel-size calibration.}
+\label{tab:podfam_classical}
+\begin{tabular}{lllll}
+\toprule
+\textbf{Sample} & \textbf{Method} & \textbf{Defect (\%)} & \textbf{Pore count} & \textbf{Mean $\varnothing$ (px)} \\
+\midrule
+sample\_01 (test)   & Otsu             & 0.003  & 997        & 5.36 \\
+                     & Yen              & 42.535 & 1,743,429  & 5.15 \\
+                     & Bernsen (label)  & 0.043  & 11,928     & 5.41 \\
+sample\_02 (train)  & Otsu             & 2.993  & 336,468    & 8.20 \\
+                     & Yen              & 38.132 & 443,339    & 10.19 \\
+                     & Bernsen (label)  & 7.586  & 478,196    & 10.67 \\
+sample\_03 (excl.)  & Otsu             & 0.067  & 8,850      & 7.87 \\
+                     & Yen              & 45.319 & 1,737,239  & 5.19 \\
+                     & Bernsen          & 0.230  & 51,467     & 5.55 \\
+sample\_04 (val)    & Otsu             & 0.315  & 30,992     & 6.71 \\
+                     & Yen              & 39.166 & 833,872    & 5.95 \\
+                     & Bernsen (label)  & 1.994  & 103,238    & 9.00 \\
+                     & U-Net (pred.)    & 3.239  & 122,587    & 11.28 \\
+sample\_05 (excl.)  & Otsu             & 51.729 & 53,315     & 24.57 \\
+                     & Yen              & 47.940 & 61,375     & 23.85 \\
+                     & Bernsen          & 52.767 & 51,142     & 24.73 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Yen produces a physically implausible defect fraction (38--45\%) on every sample without exception,
+including the near-empty sample\_03, confirming, on an independent dataset, the over-segmentation
+failure mode reported for Yen thresholding on AM XCT data~\citep{Kim2017}. Otsu and Bernsen disagree
+with each other by one to two orders of magnitude on the same samples (e.g.\ sample\_02: Otsu 2.993\%
+vs.\ Bernsen 7.586\%), a disagreement of the same order as the inter-method uncertainty separately
+quantified in the literature~\citep{AppliedSciences2025}. The U-Net's predicted defect fraction on
+its own validation sample, sample\_04 (3.239\%, Table~\ref{tab:podfam_classical}), is of the same
+order as, though somewhat above, that sample's Bernsen label (1.994\%); as sample\_04 informed
+checkpoint selection via early stopping, this number is reported for completeness rather than as an
+independent generalisation result, that role is reserved for the fully held-out sample\_01
+(Sections~10.3, 10.4).
+
+\mysection{10.2 U-Net Training}
+The detector was trained on sample\_02 (train), validated on sample\_04 (val), and tested on
+sample\_01 (test), per the ranked assignment described in Section~9.4. Table~\ref{tab:podfam_epochs}
+reports validation metrics at selected epochs; the best checkpoint (epoch 8) was used for all
+subsequent evaluation. Figure~\ref{fig:training_curves} plots every one of the 18 logged epochs,
+showing how the loss and each validation metric actually moved epoch to epoch, including fluctuation
+that a selected-epoch summary table alone does not make visible.
+
+\begin{table}[htbp]
+\centering
+\caption{2D U-Net training progression (dice\_focal loss, $\lambda = 0.5$), selected epochs. Full
+  epoch-by-epoch log recorded via MLflow.}
+\label{tab:podfam_epochs}
+\begin{tabular}{llllll}
+\toprule
+\textbf{Epoch} & \textbf{Train loss} & \textbf{Val Dice} & \textbf{Val IoU} & \textbf{Val Recall} & \textbf{Note} \\
+\midrule
+1  & 0.346 & 0.497 & 0.353 & 0.996 & \\
+2  & 0.289 & 0.521 & 0.372 & 0.891 & \\
+4  & 0.215 & 0.585 & 0.434 & 0.874 & \\
+8  & 0.115 & 0.600 & 0.452 & 0.954 & best checkpoint \\
+18 & 0.058 & 0.559 & 0.407 & 0.938 & early-stopped (patience 10) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\linewidth]{training_curves_epoch_by_epoch.png}
+\caption{Left: training and validation dice-focal loss per epoch. Right: validation Dice, IoU,
+  recall, and training Dice per epoch. Dashed line marks epoch 8, the checkpoint selected for all
+  downstream evaluation; training continued for a further 10 epochs under the patience-10
+  early-stopping rule before stopping at epoch 18 without dice/IoU exceeding the epoch-8 value.}
+\label{fig:training_curves}
+\end{figure}
+
+Training loss falls smoothly and monotonically across all 18 epochs (0.346 $\to$ 0.058), while
+validation loss decreases far less smoothly and only until roughly epoch 8, after which it plateaus
+and mildly oscillates (0.294 at epoch 8 vs.\ 0.254--0.306 for epochs 9--18), the classic
+training/validation divergence pattern that early stopping is designed to catch. Validation Dice and
+IoU follow the same shape: both rise unevenly through epoch 8 and then oscillate around a similar or
+slightly lower level for the remaining 10 epochs (val Dice: 0.60 at epoch 8, ranging 0.51--0.59
+afterward) rather than continuing to improve. Validation recall is the most volatile metric across
+the whole run (oscillating between 0.857 and 0.996), consistent with a model still adjusting its
+confidence threshold response on a validation set of a single volume, with only one sample in each of
+the train/validation/test roles (Section~9.4), epoch-to-epoch metric swings reflect genuine sampling
+variance in which patches were drawn each epoch, not measurement noise. Training Dice, by contrast,
+climbs smoothly and near-monotonically throughout (0.783 $\to$ 0.921), the expected signature of a
+model continuing to fit its training data after the validation metric it is being selected on has
+stopped improving.
+
+Against the thesis's stated acceptance criteria, validation recall (0.954) exceeds the 0.80 target;
+validation Dice (0.600) and IoU (0.452) remain below the 0.75 and 0.60 targets respectively at the
+point training was stopped.
+
+\mysection{10.3 Held-Out Test Performance}
+On the fully held-out sample\_01, the trained detector achieved Dice 0.147, IoU 0.105, precision
+0.291, and recall 0.336 at the pixel level against the Bernsen pseudo-label. Considered alone, this
+is a substantial drop from validation performance. However, the predicted total defect volume
+fraction, 0.041\%, closely matches the pseudo-label's own volume fraction of 0.043\%
+(Table~\ref{tab:podfam_classical}), while predicting fewer, larger, differently-distributed pore
+instances (8,579 predicted pores vs.\ 11,928 labelled, mean diameter 6.35~px vs.\ 5.41~px). This
+combination, low per-pixel overlap alongside near-identical total predicted volume, indicates the
+detector has learned an approximately correct overall porosity level on data it never trained on,
+while diverging from the pseudo-label's specific pore boundaries and instance count. Both the
+pixel-level metrics and the volume-fraction agreement are reported together here, since either number
+alone would misrepresent the result in a different direction.
+
+\mysection{10.4 Unified Comparison}
+Table~\ref{tab:podfam_unified} places the classical methods and the trained detector side by side on
+the held-out test sample sample\_01.
+
+\begin{table}[htbp]
+\centering
+\caption{Classical vs.\ U-Net, held-out test sample. U-Net's predicted defect fraction (0.041\%)
+  sits between Otsu's near-zero result and Bernsen's label, closest to the label it was trained to
+  reproduce, on data it never saw during training.}
+\label{tab:podfam_unified}
+\begin{tabular}{lllll}
+\toprule
+\textbf{Sample} & \textbf{Method} & \textbf{Defect (\%)} & \textbf{Pore count} & \textbf{Mean $\varnothing$ (px)} \\
+\midrule
+sample\_01 (held-out test) & Otsu             & 0.003  & 997       & 5.36 \\
+                            & Yen              & 42.535 & 1,743,429 & 5.15 \\
+                            & Bernsen (label)  & 0.043  & 11,928    & 5.41 \\
+                            & U-Net (pred.)    & 0.041  & 8,579     & 6.35 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\mysection{10.5 Extended Validation: sample\_07}
+A sixth PODFAM sample, sample\_07 (1,473 slices, $1143\times1215$ pixels), was acquired and processed
+after the five-sample validation reported above, using the identical preprocessing, thresholding, and
+trained-detector inference pipeline described in Section~9, with no retraining or checkpoint changes.
+sample\_07 was not assigned a role in the ranked train/validation/test split (Section~9.4); it is
+reported here purely as an out-of-distribution check on the same epoch-8 checkpoint used throughout
+Section~10.
+
+\begin{table}[htbp]
+\centering
+\caption{sample\_07, full 1,473-slice volume. All three classical methods report 17--19\% defect
+  fraction; the U-Net predicts 3.052\%.}
+\label{tab:sample07_classical}
+\begin{tabular}{llll}
+\toprule
+\textbf{Method} & \textbf{Defect (\%)} & \textbf{Pore count} & \textbf{Mean $\varnothing$ (px)} \\
+\midrule
+Otsu           & 18.177 & 330,344 & 9.15 \\
+Yen            & 17.581 & 57,380  & 19.19 \\
+Bernsen        & 19.369 & 354,426 & 9.15 \\
+U-Net (pred.)  & 3.052  & 744,206 & 6.43 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All three classical methods agree with one another on sample\_07 (17.6--19.4\%), which superficially
+looks like corroboration rather than error. However, the same diagnostic applied in Section~9.5
+identifies the same failure mode: sample\_07's processed slices have a mean intensity of 108.3
+(measured on the mid-volume slice), below the fixed intensity threshold (128) that Bernsen's
+low-contrast fallback branch uses to separate solid material from void. The auto-computed DCT for
+sample\_07 (227) is, as with every other PODFAM sample, far above the approximately 15 the underlying
+method reports as typical~\citep{Kim2017}, so the fallback branch dominates the classification.
+sample\_05 (mean intensity 79.9, Section~9.5) showed the identical pattern at a more extreme value
+and was excluded via the 10\%-defect-fraction guard; sample\_07's mean intensity is closer to the
+fallback's 128 boundary, so the resulting over-estimate (17--19\%) is smaller in magnitude than
+sample\_05's (approximately 52\%) but attributable to the same upstream cause.
+Table~\ref{tab:sample07_diagnostic} places this in context against the four samples from
+Section~10.1.
+
+\begin{table}[htbp]
+\centering
+\caption{Mean processed-slice intensity vs.\ Bernsen defect fraction across all PODFAM samples. The
+  two samples whose mean intensity falls below the fallback threshold (128) are exactly the two
+  samples with implausibly high Bernsen defect fractions, reproducing the same failure mode at two
+  different severities rather than two unrelated anomalies.}
+\label{tab:sample07_diagnostic}
+\begin{tabular}{lllll}
+\toprule
+\textbf{Sample} & \textbf{Mean intensity} & \textbf{Auto-DCT} & \textbf{Below 128?} & \textbf{Bernsen defect (\%)} \\
+\midrule
+sample\_01           & 167.0 & 84      & No  & 0.043 \\
+sample\_02           & 142.3 & 329     & No  & 7.586 \\
+sample\_04           & 163.4 & 152     & No  & 1.994 \\
+sample\_07           & 108.3 & 227     & Yes & 19.369 \\
+sample\_05 (excl.)   & 79.9  & 329--520 & Yes & 52.767 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Under this reading, the U-Net's prediction of 3.052\% is the more credible estimate for sample\_07:
+it is of the same order as sample\_02's Bernsen-labelled fraction (7.586\%) and sample\_04's U-Net
+prediction (3.239\%), rather than an order of magnitude higher like the three classical methods on
+this sample. This is, however, an inference-only result, sample\_07 was never assigned a
+ground-truth role, so this comparison should be read as a plausibility check on the detector's
+generalisation, not as a validated accuracy figure; see Section~12 for the corresponding limitation.
+Figures~\ref{fig:s07_mesh}--\ref{fig:s07_mosaic} show the U-Net's predicted defect volume for
+sample\_07 from four complementary viewpoints.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.75\linewidth]{sample_07_unet_3d_mesh.png}
+\caption{sample\_07, U-Net-predicted defect volume, marching-cubes 3D mesh reconstruction.}
+\label{fig:s07_mesh}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.75\linewidth]{sample_07_unet_defect_scatter.png}
+\caption{sample\_07, U-Net-predicted defect voxel scatter, coloured by slice depth.}
+\label{fig:s07_scatter}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\linewidth]{sample_07_unet_orthographic_mip.png}
+\caption{sample\_07, orthographic maximum-intensity projections (top row) and U-Net defect density
+  projections (bottom row) along the three principal axes.}
+\label{fig:s07_mip}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\linewidth]{sample_07_unet_slice_mosaic.png}
+\caption{sample\_07, mosaic of 20 evenly-spaced slices with the U-Net's predicted defect mask
+  overlaid in red.}
+\label{fig:s07_mosaic}
+\end{figure}

@@ -1,0 +1,258 @@
+% =============================================================================
+% Chapter 15: Results -- Part III (Extended Validation)
+% =============================================================================
+\mychapter{15. Results --- Extended Validation}
+
+\mysection{15.1 Loss-Function Ablation Results}
+Table~\ref{tab:loss_ablation} reports validation-set performance for all four loss configurations,
+trained and evaluated under the identical split described in Section~14.3.
+
+\begin{table}[htbp]
+\centering
+\caption{Loss-function ablation, validation-sample (sample\_03) results. BCE achieves the best raw
+  Dice and IoU of the four configurations.}
+\label{tab:loss_ablation}
+\begin{tabular}{lllll}
+\toprule
+\textbf{Loss} & \textbf{Val Dice} & \textbf{Val IoU} & \textbf{Precision} & \textbf{Recall} \\
+\midrule
+BCE                    & \textbf{0.7275} & \textbf{0.6235} & 0.809 & 0.7206 \\
+Dice                   & 0.691           & 0.578           & 0.822 & 0.672 \\
+Combined Dice-Focal (Part II's choice) & 0.696 & 0.578      & 0.741 & 0.7278 \\
+Focal                  & 0.574           & 0.466           & \textbf{0.976} & 0.471 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+BCE achieves the best Dice and IoU of the four configurations. It was not selected as the primary
+formulation when this comparison was first run, combined Dice-Focal was retained instead on the
+grounds of a more balanced precision/recall trade-off, but re-examining the exact figures shows that
+framing overstated the difference: BCE's recall (0.7206) is only 0.0072 below combined Dice-Focal's
+(0.7278), not a meaningful trade-off given the other three metrics all favour BCE outright. Separately,
+and independently of this ablation, the held-out generalisation-gap checkpoint identified in
+Section~15.2 below records a validation Dice of 0.7275 at epoch 13, an exact match to this table's BCE
+row, confirming that checkpoint was already trained with BCE loss. Taken together, these two points of
+evidence support formalising BCE as the primary loss function for this pipeline going forward, rather
+than combined Dice-Focal.
+
+\mysection{15.2 The Generalisation Gap}
+Table~\ref{tab:generalisation_gap} reports the same checkpoints' Dice on their validation sample
+(sample\_03) against their Dice on the fully held-out test sample (sample\_01, never included in
+training or validation for any configuration in this part).
+
+\begin{table}[htbp]
+\centering
+\caption{Validation Dice vs.\ held-out test Dice, across the preprocessing and masking ablations of
+  Sections~14.3--14.5. All configurations share the same held-out sample, sample\_01. Acceptance
+  criteria (Dice~$\geq$~0.75, IoU~$\geq$~0.60, Recall~$\geq$~0.80) fail in every configuration on the
+  held-out sample.}
+\label{tab:generalisation_gap}
+\small
+\begin{tabular}{p{7.8cm}p{3.2cm}p{3.2cm}}
+\toprule
+\textbf{Configuration} & \textbf{Validation Dice} & \textbf{Held-out test Dice} \\
+\midrule
+BCE, baseline (3-stage) preprocessing, circular mask & 0.7275 & 0.1218 \\
+BCE, + BHC/ring preprocessing, circular mask         & 0.7013 & 0.1693 \\
+BCE, + BHC/ring preprocessing, shape-aware mask       & $\sim$0.70 & 0.2119 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Every configuration shows the same pattern: validation Dice in the 0.70--0.73 range, held-out test
+Dice far lower, 0.12--0.21. This gap is present in the original (Part II) configuration as well
+(Section~10.3: validation Dice 0.600, held-out test Dice 0.147), so it is corroborated by two
+independently run experiments using different sample-role assignments and different loss/preprocessing
+configurations, not an artefact of one specific run. Table~\ref{tab:preproc_ablation} reports the full
+held-out test metrics for the two directly comparable configurations (baseline vs.\ BHC/ring,
+circular mask both).
+
+\begin{table}[htbp]
+\centering
+\caption{Preprocessing ablation, full held-out test set metrics (sample\_01), circular mask both
+  configurations.}
+\label{tab:preproc_ablation}
+\begin{tabular}{lllll}
+\toprule
+\textbf{Configuration} & \textbf{Dice} & \textbf{IoU} & \textbf{Precision} & \textbf{Recall} \\
+\midrule
+Baseline (3-stage preprocessing) & 0.1218 & 0.0907 & 0.2908 & 0.3134 \\
++ BHC and ring-artefact correction & 0.1693 & 0.1328 & 0.4049 & 0.2974 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Held-out test Dice improves by 39\% relative (0.1218 $\to$ 0.1693) with BHC/ring correction added,
+while validation Dice moves slightly in the opposite direction (0.7275 $\to$ 0.7013). Read together,
+this indicates the preprocessing change improves genuine generalisation to unseen data rather than
+fitting the validation sample more closely, since the more trustworthy of the two numbers (held-out,
+never used for any training decision) improved while the less trustworthy one (validation, used for
+checkpoint selection) did not. Adding the shape-aware boundary mask of Section~14.5 on top of BHC/ring
+continues the same trend, held-out Dice rises further to 0.2119, a monotonic improvement across all
+three configurations (0.1218 $\to$ 0.1693 $\to$ 0.2119) even though every configuration still fails the
+thesis's acceptance criteria by a wide margin.
+
+\mysection{15.3 Shape-Aware Masking Results}
+Table~\ref{tab:podfam_shape_aware} reports the corrected full-volume Bernsen defect statistics for
+sample\_06 and sample\_07 using the shape-aware boundary method of Section~14.5, alongside the
+uncorrected result the original erosion setting produced.
+
+\begin{table}[htbp]
+\centering
+\caption{sample\_06/07, shape-aware boundary detection, before and after erosion-margin correction.
+  sample\_06's initial result was found to be a boundary artefact, not genuine porosity; sample\_07's
+  corrected result was confirmed genuine by visual inspection of the full slice mosaic.}
+\label{tab:podfam_shape_aware}
+\small
+\begin{tabular}{p{2.2cm}p{6.5cm}p{5.5cm}}
+\toprule
+\textbf{Sample} & \textbf{Defect fraction, erosion=8px (uncorrected)} & \textbf{Defect fraction, erosion=35px (corrected)} \\
+\midrule
+sample\_06 & 2.92\% (boundary rim artefact) & \textbf{0.030\%} \\
+sample\_07 & --- & \textbf{0.759\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+sample\_06's uncorrected result (2.92\%) is roughly two orders of magnitude above its corrected value
+(0.030\%), traced to a thin rim of partial-volume boundary pixels being misclassified as defect at the
+original 8~px erosion margin; a sweep of erosion values (25, 30, 35, and 40~px) showed the false rim
+shrinking smoothly and predictably as the margin increased, with 35~px selected as the value fully
+removing the artefact without eroding genuine interior material. sample\_07's corrected result
+(0.759\%) was cross-checked by direct visual inspection of its full slice mosaic and judged to reflect
+genuine porosity rather than a residual boundary effect. For comparison, the circular-fit method
+applied to sample\_01--05 in this same later pipeline pass gives full-volume Bernsen defect fractions
+of 0.055\% (sample\_01), 6.494\% (sample\_02), 0.181\% (sample\_03), 1.641\% (sample\_04, adaptive
+Otsu boundary threshold), and 53.42\% (sample\_05, fixed boundary threshold, required because its
+$\sim$72\% porosity leaves too few solid pixels for Otsu's two-class assumption to hold, Section~14.5).
+These figures are from an independently re-run pipeline pass and are not identical to Section~10.1's
+Table~\ref{tab:podfam_classical} figures for the same samples, both are genuine pipeline outputs from
+different points in this work and are reported here as such rather than reconciled into one number.
+
+The Pearson correlation between each classical method's per-sample defect fraction and Kim et
+al.'s~\citep{Kim2017} independently published porosity (Section~14.9, five NIST samples in common)
+was recomputed under the circular, no-mask, and shape-aware boundary configurations, to check whether
+replacing the circular assumption changes the pipeline's already-established external-validation
+accuracy. Table~\ref{tab:mask_r_comparison} shows the result.
+
+\begin{table}[htbp]
+\centering
+\caption{Pearson $r$ vs.\ Kim et al.'s published porosity, by boundary-detection method (NIST samples,
+  $n=5$). Removing the boundary mask entirely is unusable; shape-aware masking is statistically
+  indistinguishable from the circular mask it replaces.}
+\label{tab:mask_r_comparison}
+\begin{tabular}{llll}
+\toprule
+\textbf{Method} & \textbf{Circular mask} & \textbf{No mask} & \textbf{Shape-aware mask} \\
+\midrule
+Otsu    & 0.983 & 0.984 & 0.982 \\
+Yen     & 0.503 & $\sim$0.43 & $\sim$0.50 \\
+Bernsen & \textbf{0.995} & 0.992 & 0.991 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+With no boundary mask at all, background air is misclassified as defect on low-porosity samples, Otsu's
+defect fraction on one near-zero-porosity sample jumped from 0\% to 24\% once the mask was removed,
+making that configuration unusable despite its $r$ value alone looking comparable. Shape-aware masking,
+by contrast, reproduces the circular mask's accuracy to within 0.001--0.004 of $r$ across all three
+methods, recovering the same measured accuracy with a method that carries no assumption about
+cross-sectional shape.
+
+\mysection{15.4 Background-Masking Fix for Detector Inference}
+Table~\ref{tab:bg_mask_fix} reports the trained detector's predicted defect fraction on sample\_07
+(out-of-distribution inference only, Section~14.7) before and after applying the shape-aware
+background-masking fix.
+
+\begin{table}[htbp]
+\centering
+\caption{sample\_07, U-Net predicted defect fraction, same checkpoint and same sample, before and
+  after the background-masking fix.}
+\label{tab:bg_mask_fix}
+\begin{tabular}{ll}
+\toprule
+\textbf{Configuration} & \textbf{Predicted defect fraction} \\
+\midrule
+2.5D U-Net, before fix    & 26.778\% \\
+2.5D U-Net, after fix     & 4.764\% \\
+2D U-Net, after fix       & 2.691\% \\
+Bernsen classical (reference, same sample) & 7.060\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The fix produces a 5.6$\times$ reduction (26.778\% $\to$ 4.764\%) using the identical checkpoint on the
+identical sample, only the background masking changed. This confirms most of the pre-fix number was
+background hallucination on transition/support-structure content rather than a fundamental defect-
+detection failure. sample\_07 was never in this checkpoint's training distribution (different
+geometry, and processed with a different preprocessing configuration than the training samples), so
+none of the figures in this table can be checked against ground truth; they are reported as an
+internal consistency check on the fix, not as a validated accuracy result.
+
+\mysection{15.5 Canny Boundary Detection: Validation and Failure}
+On sample\_01--05, Canny edge detection with morphological closing reproduces the production
+circular-fit defect fractions closely, 6.62\% vs.\ 6.49\% for sample\_02, and 1.69\% vs.\ 1.64\% for
+sample\_04, cross-confirming those production numbers by an independent method. On sample\_06/07, it
+correctly follows the true material boundary through most of each volume's depth, but on two slices it
+instead traces the surrounding support scaffold, reporting 29.96\% defect content against a true value
+of approximately 0--2\% at those slices. As discussed in Section~14.6, this failure was traced to the
+underlying image content (a genuinely ambiguous material/scaffold contrast at those specific slices)
+rather than a fixable parameter, and the shape-aware method of Section~14.5 remains the production
+choice for these two samples for that reason.
+
+\mysection{15.6 Conv-Block Attribution Results}
+Table~\ref{tab:convblock} reports each convolutional block's relative contribution to the defect
+decision, computed as described in Section~14.8, on the BCE checkpoint identified in Section~15.1 as
+the strongest of the four loss-function configurations.
+
+\begin{table}[htbp]
+\centering
+\caption{Gradient$\times$activation attribution per convolutional block, BCE checkpoint (verified
+  val\_dice = 0.7275, epoch 13). The three encoder blocks together account for approximately 69\% of
+  the total attributed signal; the final decoder block is the least influential of all nine.}
+\label{tab:convblock}
+\begin{tabular}{lll}
+\toprule
+\textbf{Block} & \textbf{Channels} & \textbf{Attributed signal} \\
+\midrule
+encoder\_1  & 64   & 27.78\% \\
+encoder\_2  & 128  & 25.81\% \\
+encoder\_3  & 256  & 15.29\% \\
+encoder\_4  & 512  & 6.84\% \\
+decoder\_3  & 128  & 6.36\% \\
+decoder\_2  & 256  & 6.10\% \\
+bottleneck  & 1024 & 5.92\% \\
+decoder\_1  & 512  & 4.63\% \\
+decoder\_4  & 64   & \textbf{1.28\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+encoder\_1 through encoder\_3 together account for 68.88\% of the attributed signal, while decoder\_4,
+the block closest to the final output layer, is the least influential of all nine (1.28\%). This
+analysis was first run, in error, on the combined Dice-Focal checkpoint (\texttt{top6\_by\_voids})
+rather than the correct BCE checkpoint, before the ablation of Section~15.1 had settled which
+checkpoint should be treated as primary; that run found the same qualitative pattern at a smaller
+magnitude (encoder\_1--3 combined: 61.7\%; decoder\_4: 1.46\%). Re-running the analysis on the verified
+BCE checkpoint after the fact, the pattern reported in Table~\ref{tab:convblock} replicated cleanly and
+was, if anything, stronger.
+
+\mysection{15.7 External Validation and Voxel-Size Results}
+The gravimetric cross-check identified in Section~14.9 covers, in Kim et al.'s own sample numbering,
+samples 2, 4, 5, and 6, with XCT-vs-gravimetric agreement within 1--4\% absolute and threshold-
+sensitivity uncertainty below $\pm 0.12\%$~\citep{Kim2017}. This strengthens the interpretation of this
+thesis's own $r = 0.995$ Bernsen-vs-Kim-et-al.\ correlation, Table~\ref{tab:mask_r_comparison}, as
+agreement with a reference value that already carries independent physical grounding rather than a
+purely XCT-internal comparison, with the caveat, stated in Section~14.9, that individual per-sample
+confirmation of the gravimetric check for all five NIST samples used in this thesis's own correlation
+was not independently verified here.
+
+The physical voxel-size figures determined in Section~14.10 are: PODFAM sample\_06 and sample\_07,
+12.001~\textmu m/px (from embedded raw-TIFF resolution metadata, consistent across both samples),
+giving approximate physical dimensions of 12.3~mm~$\times$~14.8~mm~$\times$~17.6~mm for sample\_06 and
+14.6~mm~$\times$~13.7~mm~$\times$~17.7~mm for sample\_07; and NIST CoCr samples, approximately
+2.5~\textmu m/px for samples 1, 2, and 4, and 0.87~\textmu m/px for samples 3 and 5, per the dataset's
+own published documentation~\citep{NIST_CoCr}. \texttt{config.py}'s \param{PIXEL\_SIZE\_UM} constant
+itself remains at its unfilled placeholder value in the running pipeline; these figures are reported
+as an external measurement against the raw data and documentation, not as a change already applied to
+the pipeline's own unit conversions.

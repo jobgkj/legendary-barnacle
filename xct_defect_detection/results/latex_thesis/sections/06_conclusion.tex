@@ -1,0 +1,104 @@
+% =============================================================================
+% Chapter 6: Conclusion -- Part I
+% =============================================================================
+\mychapter{6. Conclusion}
+
+This mid-term report documents the progress of a master's thesis project on automated XCT defect
+detection in additively manufactured metal components using deep learning. The project is on
+schedule and has completed the literature review, research design, dataset acquisition and
+characterisation, full preprocessing pipeline implementation and validation, patch extraction, data
+augmentation, parameter sensitivity analysis, and initial detection model training on the NIST CoCr
+\texttt{set1sample2raw} dataset.
+
+\mysection{6.1 Preprocessing Pipeline}
+The four-stage preprocessing pipeline, percentile normalisation, beam hardening correction, ring
+artefact suppression, and non-local means denoising, was successfully validated on the full NIST CoCr
+\texttt{set1sample2raw} dataset (900 slices, $1010\times980$ pixels, raw intensity range
+$[0, 59631]$) in 578.5 seconds on CPU. The pipeline achieves a noise standard deviation reduction
+from 20952 to 0.385, a factor of $\times 54{,}500$, and an SNR improvement from 1.756 to 1.773.
+Visual confirmation (Figures 4.1 and 4.2) demonstrates that defect boundary sharpness is preserved
+throughout all preprocessing stages, which is essential for reliable detection of sub-100~$\mu$m
+defects.
+
+Parameter sensitivity analysis (Figures 4.6, 4.7, 4.8, 4.9) confirmed the optimal configuration: NLM
+filter strength $h = 1.0$ (sweep value; deployed pipeline uses adaptive 0.6), BHC polynomial degree
+$d = 3$, and ring filter radius $r = 15$ pixels. This represents an original empirical contribution,
+preprocessing parameter selection is frequently omitted or unjustified in published XCT defect
+detection studies.
+
+\mysection{6.2 Patch Extraction and Augmentation}
+Patch extraction with $256\times256$ pixel patches and 50\% overlap stride was validated on NIST CoCr
+data, producing 15,840 patches at $64\times64$ and 3,860 patches at $128\times128$ from 20 sampled
+slices (Figures 4.10 and 4.11). The stratified 1:3 foreground-to-background sampling strategy was
+implemented and verified to address the severe class imbalance of 1.2--2.8\% defect
+voxels~\citep{Sudre2017}.
+
+All six augmentation transforms were validated on NIST CoCr patches (Figure~4.12), confirming correct
+spatial alignment between image and label patches across all transform types~\citep{Bellens2021}.
+
+\mysection{6.3 Preliminary Detection Results}
+Initial 2D U-Net training on NIST CoCr automatic labels demonstrates clear improvement over both the
+classical baseline and the BCE loss formulation:
+
+\begin{table}[htbp]
+\centering
+\caption{Preliminary detection results after 20 training epochs.}
+\label{tab:final_prelim}
+\begin{tabular}{lll}
+\toprule
+\textbf{Method} & \textbf{Validation Dice} & \textbf{vs.\ Target} \\
+\midrule
+Otsu baseline & 0.38 & --- \\
+2D U-Net + BCE & 0.41 & $-45\%$ below target \\
+2D U-Net + Dice-Focal & 0.68 & $-9\%$ below target \\
+Acceptance criterion & 0.75 & Target \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The combined Dice-Focal loss already surpasses the Otsu label generator itself (0.68 vs.\ 0.38),
+confirming that the U-Net is learning to detect defects beyond the capability of its training
+labels~\citep{Yosifov2020}. Full training to convergence and evaluation against the held-out test set
+is the immediate next priority.
+
+\mysection{6.4 Key Conclusions}
+\begin{itemize}
+\item \textbf{Preprocessing is essential and quantifiable}: The four-stage pipeline reduces noise by
+  a factor of $\times 54{,}500$ and removes systematic artefacts that would otherwise mask or mimic
+  defects. Without preprocessing, reliable automatic label generation and deep learning detection are
+  not feasible on this dataset.
+\item \textbf{Automatic label generation is viable}: The two-stage Otsu strategy, applying
+  thresholding within the metal region only, avoids the background misclassification failure mode of
+  single-pass global thresholding. The U-Net already generalises beyond its noisy labels, validating
+  this approach~\citep{Yosifov2020,Otsu1979}.
+\item \textbf{Loss function choice is critical}: Combined Dice-Focal loss achieves 66\% higher
+  validation Dice than BCE (0.68 vs.\ 0.41) after 20 epochs, confirming that class-imbalance-aware
+  loss functions are essential for XCT defect detection~\citep{Sudre2017,Lin2017}.
+\item \textbf{2D detection is practical and competitive}: The 2D U-Net processes $256\times256$
+  patches efficiently, consistent with published findings that 2D approaches achieve within 2--4\% of
+  full 3D performance at substantially lower computational cost~\citep{Wong2021}.
+\item \textbf{Standardised benchmarking enables reproducibility}: The use of the publicly available
+  NIST CoCr AM XCT dataset~\citep{NIST_CoCr} ensures that all results can be independently reproduced
+  and compared against future work.
+\item \textbf{An end-to-end documented pipeline is the primary deliverable}: The complete pipeline,
+  from raw TIFF stack to trained detector with MLflow tracking and DVC dataset versioning, is
+  version-controlled on Git and designed for adoption by the AM inspection research community.
+\end{itemize}
+
+\mysection{6.5 Remaining Work}
+The following work remained after the mid-term submission; Part II of this document reports what has
+since been completed:
+\begin{itemize}
+\item Complete 2D U-Net training to convergence and full evaluation on the held-out NIST CoCr test
+  set against all four acceptance criteria (Dice $\geq 0.75$, IoU $\geq 0.60$, Recall $\geq 0.80$ for
+  defects $> 50\,\mu$m, inference time $\leq 120$ seconds)
+\item Systematic comparison of all four loss function formulations (BCE, Dice, Focal, combined
+  Dice-Focal)
+\item Independent assessment of each augmentation transform's contribution to detection performance
+\item Manual annotation of 5--10 representative NIST CoCr slices for independent ground truth
+  validation
+\item Application to additional datasets for cross-material generalisation evaluation, completed for
+  PODFAM data in Part II
+\item Full results, discussion, and conclusion chapter, completed for the PODFAM phase in Part II
+\item Final pipeline documentation and open-source release on Git
+\end{itemize}

@@ -49,3 +49,17 @@ results/masks/
 # Logs
 # =========================
 *.log
+
+# =========================
+# LaTeX build artifacts
+# =========================
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.toc
+
+# Thesis figures are an explicit exception to the blanket *.png rule above
+!results/latex_thesis/figures/*.png

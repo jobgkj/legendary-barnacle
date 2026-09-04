@@ -1,0 +1,156 @@
+% =============================================================================
+% Automated XCT Data Analysis for Defect Detection in Additively Manufactured
+% Metal Parts -- Combined Mid-Term Report (Part I) + PODFAM Validation (Part II)
+%
+% This file uses standard report-class LaTeX (geometry/amsmath/graphicx/
+% booktabs/natbib/hyperref) rather than the University West .cls template,
+% since that template file was not available to generate against. Swap the
+% \documentclass line and title-page commands for the official template's
+% equivalents if you have it; the section content in sections/*.tex does not
+% depend on which template wraps it.
+% =============================================================================
+\documentclass[12pt,a4paper,oneside]{report}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{tocloft}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hyphens]{url}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{amsfonts}
+\usepackage{microtype}
+\usepackage{seqsplit}
+\urlstyle{tt}
+\sloppy
+
+% Long ALL_CAPS_WITH_UNDERSCORES config-parameter identifiers don't have
+% natural break points for LaTeX's line breaker; \param{} lets them wrap
+% inside narrow table columns instead of overflowing the page margin.
+\newcommand{\param}[1]{\texttt{\seqsplit{#1}}}
+
+\graphicspath{{figures/}}
+
+\setlength{\parskip}{0.4em}
+\setlength{\parindent}{0pt}
+
+% All chapter/section numbers in this thesis are typed manually into the
+% heading text (e.g. "1. Introduction", "9.3 Sample-Boundary Detection...")
+% rather than left to LaTeX's automatic numbering, since Part II continues
+% the chapter count from Part I (7-13) and the appendices use letters --
+% three different numbering schemes LaTeX's \chapter/\section counters
+% don't switch between automatically. These starred-heading macros give
+% correctly numbered, correctly styled headings that still populate the
+% table of contents and running headers.
+\newcommand{\mychapter}[1]{\chapter*{#1}\addcontentsline{toc}{chapter}{#1}\markboth{#1}{}}
+\newcommand{\mysection}[1]{\section*{#1}\addcontentsline{toc}{section}{#1}}
+\newcommand{\mysubsection}[1]{\subsection*{#1}\addcontentsline{toc}{subsection}{#1}}
+\newcommand{\mysubsubsection}[1]{\subsubsection*{#1}\addcontentsline{toc}{subsubsection}{#1}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\footnotesize\itshape Automated XCT Data Analysis for Defect Detection in AM Metal Parts}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\title{Automated XCT Data Analysis for Defect Detection in\\ Additively Manufactured Metal Parts}
+\author{Job George Konnoth Joseph}
+\date{}
+
+\begin{document}
+
+% ---------------------------------------------------------------------------
+% Front matter
+% ---------------------------------------------------------------------------
+\input{sections/00_titlepage}
+\pagenumbering{roman}
+\input{sections/00_frontmatter}
+\tableofcontents
+\clearpage
+\input{sections/00_glossary}
+\clearpage
+
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+% ---------------------------------------------------------------------------
+% PART I -- Mid-term report (NIST CoCr development phase)
+% ---------------------------------------------------------------------------
+\begin{center}
+{\large\bfseries PART I}\\[4pt]
+{\Huge\bfseries MID-TERM REPORT}\\[8pt]
+{\large\itshape NIST CoCr AM XCT Development Phase --- as submitted April 26, 2026}
+\end{center}
+\clearpage
+
+\input{sections/01_introduction}
+\input{sections/02_related_work}
+\input{sections/03_method}
+\input{sections/04_work}
+\input{sections/05_results_discussion}
+\input{sections/06_conclusion}
+
+% ---------------------------------------------------------------------------
+% Bibliography (single, merged, deduplicated list covering Part I and Part II)
+% ---------------------------------------------------------------------------
+\bibliographystyle{unsrt}
+\bibliography{references}
+
+% ---------------------------------------------------------------------------
+% Appendices (Part I) -- lettered manually in the heading text; see the
+% \mychapter note above for why \appendix is not used here.
+% ---------------------------------------------------------------------------
+\input{sections/appendixA}
+\input{sections/appendixB}
+
+% ---------------------------------------------------------------------------
+% PART II -- PODFAM validation phase
+% ---------------------------------------------------------------------------
+\clearpage
+\begin{center}
+{\large\bfseries PART II}\\[4pt]
+{\Huge\bfseries PODFAM VALIDATION PHASE}\\[8pt]
+{\large\itshape Bernsen Pseudo-Labelling and a 2D U-Net Detector, Validated on the\\
+PODFAM Metal AM XCT Sample Set}
+\end{center}
+\clearpage
+
+\input{sections/07_podfam_introduction}
+\input{sections/08_podfam_related_work}
+\input{sections/09_podfam_method}
+\input{sections/10_podfam_results}
+\input{sections/11_podfam_discussion}
+\input{sections/12_podfam_limitations}
+\input{sections/13_podfam_conclusion}
+
+% ---------------------------------------------------------------------------
+% PART III -- Extended validation: loss-function, preprocessing, and
+% boundary-detection ablations; conv-block attribution; strengthened
+% external validation
+% ---------------------------------------------------------------------------
+\clearpage
+\begin{center}
+{\large\bfseries PART III}\\[4pt]
+{\Huge\bfseries EXTENDED VALIDATION}\\[8pt]
+{\large\itshape Loss-Function, Preprocessing, and Boundary-Detection Ablations on the\\
+PODFAM Pipeline, with Network Attribution and Strengthened External Validation}
+\end{center}
+\clearpage
+
+\input{sections/14_extended_method}
+\input{sections/15_extended_results}
+\input{sections/16_extended_discussion}
+\input{sections/17_extended_limitations}
+\input{sections/18_extended_conclusion}
+
+\end{document}

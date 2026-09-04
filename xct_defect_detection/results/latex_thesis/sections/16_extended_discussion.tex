@@ -1,0 +1,75 @@
+% =============================================================================
+% Chapter 16: Discussion -- Part III (Extended Validation)
+% =============================================================================
+\mychapter{16. Discussion --- Extended Validation}
+
+The single most important result in this part is the generalisation gap itself
+(Section~15.2), not any one preprocessing or masking choice. Validation Dice in the 0.60--0.73 range
+was already established as a plausible, defensible detection result by Part II; this part shows that
+number does not predict performance on a sample genuinely never seen during training, which instead
+falls to 0.12--0.21 across every configuration tested, including the original Part II configuration
+itself (0.600 vs.\ 0.147, Section~10.3). Because this pattern reproduces across two independently run
+experiments with different sample-role assignments, different loss functions, and different
+preprocessing pipelines, it is best explained as a property of this pipeline's train/validation/test
+design, specifically, how few distinct samples are available to fill the validation and held-out-test
+roles, rather than as an artefact of any single training run. This reframes the acceptance-criteria
+shortfall already stated in Part II (Section~10.2) as a structural finding rather than a training
+issue that more epochs or a different loss function would resolve on its own.
+
+Within that constraint, the preprocessing and masking ablations (Sections~15.2, 15.3) still show a
+genuine, monotonic improvement in the more trustworthy of the two numbers: held-out test Dice rises
+from 0.1218 to 0.1693 to 0.2119 as BHC/ring correction and then shape-aware masking are added, even as
+validation Dice stays flat or drifts slightly downward. Read together with the generalisation-gap
+finding above, this supports two separate conclusions rather than one: the pipeline's absolute
+detection accuracy on unseen data remains far below the acceptance criteria, and the specific
+preprocessing and masking changes tested here are moving that number in the right direction rather
+than the wrong one, evidence that the improvements are real generalisation gains and not artefacts of
+fitting the validation sample more closely.
+
+The loss-function ablation (Section~15.1) resolves an inconsistency in how Part II's own headline
+result and its stated primary loss function relate to one another: the held-out generalisation-gap
+checkpoint's own recorded validation Dice (0.7275, epoch 13) is an exact match to the loss-ablation's
+BCE row, meaning the thesis's central generalisation finding was already produced using BCE, not
+combined Dice-Focal, the loss formulation Part II states as primary. Combined with BCE's higher raw
+Dice and IoU and a recall difference against Dice-Focal (0.0072) too small to support the earlier
+precision/recall trade-off argument for preferring Dice-Focal, this is read here as sufficient grounds
+to recommend BCE as the pipeline's primary loss function, correcting rather than merely supplementing
+Part II's stated choice.
+
+The conv-block attribution result (Section~15.6) offers one concrete, if bounded, architectural
+implication: with encoder\_1--3 together responsible for roughly two-thirds of the network's
+attributed defect-discriminating signal and the final decoder block the least influential of all nine,
+the highest-leverage architectural change for this task is more likely to be strengthening the early
+encoder stages or their skip connections, for instance via attention gating, than adding depth to the
+bottleneck or decoder. This is offered as a direction for future architecture work rather than a
+finding validated by ablation; a single attribution method on a single representative crop is
+suggestive evidence of where signal concentrates, not proof that modifying those specific blocks would
+improve held-out performance.
+
+The boundary-detection work (Sections~15.3--15.5) illustrates a pattern already established once in
+this thesis, in Section~9.5/10.5's diagnosis of Bernsen's DCT-calibration failure, and repeated here in
+a different subsystem: a method that produces a superficially plausible number can still be wrong by a
+large factor, and the wrongness is only caught by an independent cross-check. sample\_06's 2.92\%
+uncorrected defect fraction was a physically plausible-looking value for a metal AM part; only the
+erosion-margin sweep revealed it was a boundary artefact rather than genuine porosity. Canny edge
+detection (Section~15.5) supplies the same lesson from the opposite direction: it independently
+confirms the circular-fit method's numbers on samples where both methods work, which is useful
+corroboration, but it was not adopted for sample\_06/07 despite otherwise working correctly through
+most of each volume's depth, because a method that is right most of the time but silently wrong in a
+way that looks correct is a worse production choice than a method validated not to exhibit that
+failure mode at all.
+
+Finally, the two findings of Sections~14.9--14.10 and~14.10 respectively strengthen and complicate the
+thesis's use of the NIST CoCr dataset. The gravimetric cross-check in Kim et al.'s own paper means the
+$r = 0.995$ external-validation figure (Table~\ref{tab:mask_r_comparison}) is agreement with a
+reference that already carries independent physical grounding, a stronger claim than XCT-vs-XCT
+agreement alone would support, even with the caveat that individual per-sample confirmation of that
+check was not verified here. Conversely, the voxel-size finding, samples 3 and 5 scanned at roughly a
+third of the other samples' voxel size, raises a plausible, previously unconsidered explanation for why
+those specific two samples were the ones excluded from this thesis's own training and ranking
+(Sections~9.4, 9.5): a substantially finer scan resolution implies a smaller physical field of view per
+slice at the same pixel dimensions, which could independently affect both defect content captured and
+intensity/contrast statistics. This is stated explicitly as an unconfirmed hypothesis rather than a
+demonstrated cause, consistent with this thesis's practice elsewhere of separating what has been
+measured from what remains plausible but unverified, but it is a concrete, checkable direction for
+follow-up work that this part's own investigation did not have scope to pursue further.

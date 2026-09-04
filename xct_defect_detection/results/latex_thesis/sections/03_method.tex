@@ -1,0 +1,318 @@
+% =============================================================================
+% Chapter 3: Method -- Part I
+% =============================================================================
+\mychapter{3. Method}
+
+This chapter describes the complete methodology developed for automated defect detection in XCT
+scans of additively manufactured metal components. The methodology covers the research design,
+dataset description, preprocessing pipeline, automatic label generation, patch extraction, data
+augmentation, detection model architecture, loss function selection, and evaluation framework. All
+implementation decisions are justified with reference to the theoretical background presented in
+Chapter~2.
+
+\mysection{3.1 Research Design}
+The research follows a mixed-methods design integrating systematic literature review, controlled
+empirical experimentation, and practical implementation evaluation~\citep{Creswell2014}. Three
+sequential phases structure the work:
+\begin{enumerate}
+\item \textbf{Phase 1 --- Literature Review and Framework Development}: Systematic review of deep
+  learning for XCT defect detection, AM defect characterisation, preprocessing methods, and class
+  imbalance mitigation strategies. This phase produces the research questions, methodology
+  justification, and experimental design. \emph{Status: complete.}
+\item \textbf{Phase 2 --- Controlled Empirical Experimentation}: Systematic implementation and
+  benchmarking of the preprocessing pipeline, automatic label generation, and 2D U-Net defect
+  detector on the NIST CoCr AM XCT benchmark dataset. Preprocessing validation and initial model
+  training are complete. Full evaluation is in progress.
+\item \textbf{Phase 3 --- Validation and Pipeline Delivery}: Application of the validated pipeline
+  to additional datasets for generalisation evaluation, manual annotation of a small test subset for
+  independent ground truth validation, and delivery of the documented open-source pipeline.
+  \emph{Completed for the PODFAM dataset in Part II of this document.}
+\end{enumerate}
+The empirical-comparative design is justified by the applied nature of the research problem.
+Performance differences between defect detection methods must be quantified under controlled
+conditions to provide actionable guidance for industrial adoption. A purely theoretical approach
+would not produce the validated performance estimates needed to assess industrial
+suitability~\citep{Creswell2014}.
+
+\mysection{3.2 Dataset}
+\mysubsection{3.2.1 NIST CoCr AM XCT Dataset}
+The primary dataset used in this work is the NIST CoCr AM XCT dataset, publicly available from the
+NIST Intelligent Systems Division~\citep{NIST_CoCr}. This dataset comprises high-resolution XCT scans
+of metal components fabricated by LPBF, provided as TIFF image stacks. The sample used is
+\texttt{set1sample2raw}, comprising 900 slices loaded and characterised as shown in
+Table~\ref{tab:nist_properties}.
+
+\begin{table}[htbp]
+\centering
+\caption{NIST CoCr AM XCT dataset properties measured from loaded TIFF slices
+  (\texttt{set1sample2raw}).}
+\label{tab:nist_properties}
+\begin{tabular}{ll}
+\toprule
+\textbf{Property} & \textbf{Value} \\
+\midrule
+Source & NIST Intelligent Systems Division~\citep{NIST_CoCr} \\
+Sample identifier & \texttt{set1sample2raw} \\
+Number of slices & 900 \\
+Slice resolution & $1010 \times 980$ pixels \\
+Data type & uint16 (16-bit unsigned) \\
+Raw intensity range & $[0, 59631]$ \\
+Mean intensity & 36763 \\
+Std deviation & 20952 \\
+Preprocessed range & $[0, 1]$ (float32) \\
+Ground truth masks & Not available \\
+Label strategy & Automatic (two-stage Otsu) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No expert-annotated defect masks are provided with this dataset. Automatic labels are generated using
+the Otsu-based pipeline described in Section~3.4. Full material and scan parameter specifications are
+available at the NIST Intelligent Systems Division website~\citep{NIST_CoCr}.
+
+\mysubsection{3.2.2 Data Split}
+The 900 preprocessed slices are divided into training, validation, and test sets using a stratified
+split to ensure proportional representation of defect-containing patches across all sets. The split
+actually implemented in the working codebase (\texttt{config.py}: \texttt{VAL\_SPLIT},
+\texttt{TEST\_SPLIT}) is 70\% training / 20\% validation / 10\% test; this corrects the mid-term
+submission's originally stated 70/15/15 split, see the Note on this combined document:
+\begin{itemize}
+\item Training set: 70\% of patches
+\item Validation set: 20\% of patches (used for early stopping and hyperparameter selection)
+\item Test set: 10\% of patches (held out until final evaluation)
+\end{itemize}
+Splitting is performed at the patch level after stratification by foreground/background label to
+ensure the 1:3 foreground-to-background ratio is preserved in all sets.
+
+\mysection{3.3 Preprocessing Pipeline}
+Raw XCT volumes are preprocessed through a four-stage sequential pipeline implemented in
+\url{data/loader.py}. The pipeline is designed to remove systematic imaging artefacts that would
+otherwise interfere with reliable defect detection, while preserving the intensity characteristics of
+genuine defect structures. Figure~4.1 shows the visual effect of each stage on a representative NIST
+CoCr slice.
+
+\mysubsection{3.3.1 Stage 1 --- Percentile Normalisation}
+Raw intensities are clipped to the 1st and 99th percentiles and rescaled to $[0, 1]$ per
+Equation~\eqref{eq:norm}, applied to the NIST CoCr \texttt{set1sample2raw} dataset with $p_1 = 0.0$,
+$p_{99} \approx 54146$, output range $[0.0000, 1.0000]$. This approach is robust to extreme outlier
+intensities such as metal streak artefacts and hot pixels~\citep{Bellens2021}.
+
+\mysubsection{3.3.2 Stage 2 --- Beam Hardening Correction}
+A polynomial of degree $d = 3$ is fitted to the mean intensity profile along the depth axis and
+subtracted, per Equation~\eqref{eq:bhc}. The polynomial degree $d = 3$ was selected through
+systematic parameter sensitivity analysis (Section~3.3.6). Processing time on the 900-slice NIST
+volume: 36.6 seconds.
+
+\mysubsection{3.3.3 Stage 3 --- Ring Artefact Suppression}
+Each 2D slice is converted to polar coordinates centred on the component rotation axis. A median
+filter of radius $r = 15$ pixels is applied along the radial axis, where ring artefacts appear as
+systematic horizontal bands. The corrected data is then converted back to Cartesian coordinates. The
+radius $r = 15$ was selected through parameter sensitivity analysis as the minimum value achieving
+full ring suppression without spatial blurring of small defects. Processing time: 148.8 seconds for
+900 slices.
+
+\mysubsection{3.3.4 Stage 4 --- Non-Local Means Denoising}
+Non-local means denoising~\citep{Buades2005} is applied with parameters patch size 5, patch distance
+6, and filter strength $h = 0.6 \times \hat{\sigma}$, where $\hat{\sigma}$ is the per-slice estimated
+noise standard deviation of each slice (corrected from the mid-term submission's stated
+$h = 1.0 \times \hat{\sigma}$ to match the value actually implemented in \texttt{config.py}'s
+\texttt{NLM\_H\_FACTOR}; see the Note on this combined document), per Equation~\eqref{eq:nlm}.
+Processing time: 368.3 seconds for 900 slices. Total pipeline time: 578.5 seconds (9.6 minutes on
+CPU) for the full 900-slice volume.
+
+\mysubsection{3.3.5 Preprocessing Results}
+Table~\ref{tab:preproc_results} summarises the quantitative effect of the pipeline on the NIST CoCr
+dataset, measured from 50 sampled slices.
+
+\begin{table}[htbp]
+\centering
+\caption{Quantitative preprocessing results on NIST CoCr \texttt{set1sample2raw} (50 sampled
+  slices). Noise reduction factor of $\times 54{,}500$. Pipeline time 578.5~s (900 slices, CPU).}
+\label{tab:preproc_results}
+\begin{tabular}{lll}
+\toprule
+\textbf{Metric} & \textbf{Raw} & \textbf{Preprocessed} \\
+\midrule
+Intensity range & $[0, 59631]$ & $[0.0000, 1.0000]$ \\
+$p_{99}$ value & 54146 & 1.0000 \\
+Mean SNR & 1.756 & 1.773 \\
+Noise std dev & 20952.2 & 0.385 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\mysubsection{3.3.6 Parameter Sensitivity Analysis}
+A systematic sensitivity analysis was conducted to select optimal values for the three key tunable
+parameters. Each parameter was varied independently while holding others fixed, and SNR was measured
+on the NIST CoCr dataset.
+
+NLM filter strength $h \in \{0.5, 1.0, 1.5, 2.0\} \times \hat{\sigma}$: $h = 1.0$ selected as the
+optimal value for this sensitivity sweep; effective noise reduction without suppression of fine
+defect boundary sharpness. (Note: the value actually deployed in the trained pipeline is the
+adaptive factor 0.6, per Section~3.3.4 above; this sub-section reports the sweep as originally
+conducted and is not itself corrected.)
+
+BHC polynomial degree $d \in \{1, 2, 3, 5\}$: degree 1 is insufficient for the non-linear cupping
+gradient; degree 3 provides effective correction; degree 5 risks over-correction near volume
+boundaries. Degree 3 selected.
+
+Ring filter radius $r \in \{5, 10, 15, 25\}$ pixels: radius 5 is insufficient; radius 15 achieves
+full suppression without spatial blurring; radius 25 over-smooths in the radial direction. Radius 15
+selected.
+
+\mysection{3.4 Automatic Label Generation}
+Since no expert-annotated ground truth masks are available for the NIST CoCr dataset, binary
+detection labels are generated automatically using a two-stage Otsu thresholding pipeline implemented
+in \url{data/pseudo_labels.py}, following the approach of Yosifov~\citep{Yosifov2020}:
+\begin{enumerate}
+\item \textbf{Stage 1 --- Part boundary detection}: A first-pass Otsu threshold is applied to the
+  full slice to separate the metal component from the air background. This defines the region of
+  interest (ROI) inside the cylindrical part boundary. Single-pass global thresholding applied to
+  the full field of view incorrectly labels the air background as defects; the two-stage approach
+  eliminates this failure mode~\citep{Otsu1979}.
+\item \textbf{Stage 2 --- Defect detection within ROI}: A second Otsu threshold is applied within
+  the metal ROI only, identifying dark voxels below the within-metal threshold as defects.
+\item Morphological opening ($3\times3$ structuring element): removes isolated noise voxels that
+  survive thresholding.
+\item Morphological closing ($3\times3$ structuring element): fills small holes within genuine
+  defect regions.
+\item Connected component filtering: discards components smaller than 5 voxels as noise artefacts.
+\end{enumerate}
+The resulting pseudo-labels are imperfect but sufficient to provide training supervision. Preliminary
+results show that the U-Net already achieves a validation Dice score of 0.68 after 20 epochs,
+surpassing the Otsu label generator itself (0.38), confirming that the model learns to detect defects
+beyond the capability of its training labels~\citep{Yosifov2020}.
+
+\mysection{3.5 Patch Extraction}
+Full XCT volumes are divided into fixed-size 2D patches for model input, implemented in
+\url{data/dataset.py}. The patch extraction configuration is:
+\begin{itemize}
+\item Patch size: $256 \times 256$ pixels
+\item Stride: 128 pixels (50\% overlap between adjacent patches)
+\item Minimum defect pixels for a foreground patch classification: 10
+\item Foreground-to-background patch ratio: 1:3 (stratified sampling)
+\end{itemize}
+Random patch extraction would yield $> 95\%$ background-only patches due to the severe class
+imbalance (1.2--2.8\% defect voxels). The stratified 1:3 foreground-to-background oversampling
+strategy ensures sufficient gradient signal from the minority defect class during
+training~\citep{Sudre2017}.
+
+From 20 uniformly sampled slices of the NIST CoCr preprocessed volume, the following patch counts
+were extracted at different patch sizes for validation purposes:
+
+\begin{table}[htbp]
+\centering
+\caption{Patch counts extracted from 20 sampled NIST CoCr slices with 50\% overlap stride.}
+\label{tab:patch_counts}
+\begin{tabular}{ll}
+\toprule
+\textbf{Patch size} & \textbf{Total patches} \\
+\midrule
+$64 \times 64$ & 15,840 \\
+$128 \times 128$ & 3,860 \\
+$256 \times 256$ & Used for model training \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\mysection{3.6 Data Augmentation}
+Data augmentation is applied online during training to increase dataset diversity and reduce
+overfitting to scan-specific characteristics~\citep{Bellens2021}. All transforms are applied
+identically to both image patch and corresponding label patch to maintain spatial alignment. The
+augmentation pipeline is implemented in \url{data/augmentation.py} and validated on NIST CoCr
+patches as shown in Figure~4.12 (same operations as Table~\ref{tab:augmentation_ops}, Section~2.8).
+
+\mysection{3.7 Detection Model Architecture}
+\mysubsection{3.7.1 2D U-Net}
+The primary detection model is a 2D U-Net~\citep{Ronneberger2015} implemented in
+PyTorch~\citep{Paszke2019} (\url{models/unet2d.py}). The 2D formulation processes individual XCT
+slices as $256 \times 256$ pixel patches, achieving within 2--4\% of full 3D volumetric performance
+at 10--50$\times$ lower computational cost~\citep{Wong2021}. The architecture configuration is:
+\begin{itemize}
+\item Encoder: four downsampling stages, each comprising two $3\times3$ convolutional layers with
+  batch normalisation and ReLU activation~\citep{Ronneberger2015}, followed by $2\times2$ max
+  pooling. Feature channels double at each stage: $64 \to 128 \to 256 \to 512$.
+\item Bottleneck: two $3\times3$ convolutional layers with 1024 feature channels and dropout
+  regularisation ($p = 0.2$).
+\item Decoder: four upsampling stages with transposed convolutions and skip connection
+  concatenation from the corresponding encoder levels.
+\item Output layer: $1\times1$ convolution with sigmoid activation, producing per-voxel defect
+  probability in $[0, 1]$.
+\item Trainable parameters: approximately 31 million.
+\item Optimiser: Adam~\citep{Kingma2015} with learning rate $4\times10^{-5}$, trained for up to 50
+  epochs with early stopping (patience 10 epochs).
+\end{itemize}
+
+\mysubsection{3.7.2 Classical Baseline}
+Otsu thresholding with two-stage part-boundary detection and morphological post-processing
+(Section~3.4) serves as the classical lower-bound baseline, enabling direct quantitative comparison
+of deep learning detection performance against the automatic label generator itself.
+
+\mysection{3.8 Loss Functions}
+Four loss function formulations are evaluated to determine the most effective approach for defect
+detection under severe class imbalance, implemented in \url{training/losses.py}:
+\begin{enumerate}
+\item Binary cross-entropy (BCE): standard baseline, Equation~\eqref{eq:bce}. Known to cause class
+  collapse on severely imbalanced XCT data~\citep{Sudre2017}.
+\item Dice loss: directly optimises detection overlap, inherently robust to class
+  imbalance~\citep{Sudre2017}, Equation~\eqref{eq:dice_loss}.
+\item Focal loss: down-weights easy background examples, focuses training on hard defect
+  voxels~\citep{Lin2017}, Equation~\eqref{eq:focal_loss}.
+\item Combined Dice-Focal (primary formulation)~\citep{Sudre2017,Lin2017},
+  Equation~\eqref{eq:dice_focal}.
+\end{enumerate}
+Preliminary results confirm that the combined Dice-Focal loss achieves a validation Dice score of
+0.68 after 20 epochs, compared to 0.41 for BCE alone, confirming its superiority for
+class-imbalanced defect detection~\citep{Sudre2017}.
+
+\mysection{3.9 Evaluation Metrics}
+All models are evaluated using the metrics of Equations~\eqref{eq:dsc}--\eqref{eq:prec_rec},
+implemented in \url{training/metrics.py}, where $A$ is the predicted detection mask, $B$ is the
+reference label, and $TP, FP, FN$ denote true positives, false positives, and false negatives at the
+voxel level.
+
+\mysubsection{3.9.1 Acceptance Criteria}
+\begin{itemize}
+\item Dice coefficient $\geq 0.75$ on held-out test set (primary criterion)
+\item IoU $\geq 0.60$ on held-out test set
+\item Recall $\geq 0.80$ for defects with diameter $> 50\,\mu$m
+\item Inference time $\leq 120$ seconds per full scan volume on a single GPU
+\end{itemize}
+
+\mysection{3.10 Software Implementation}
+The complete pipeline is implemented as a modular Python package version-controlled on Git:
+\begin{itemize}
+\item Language: Python 3.10
+\item Deep learning: PyTorch~\citep{Paszke2019} with CUDA support
+\item Image processing: NumPy, scikit-image, SciPy for volume handling and preprocessing
+\item Experiment tracking: MLflow for logging hyperparameters, metrics, and model checkpoints
+  across all training runs
+\item Version control: Git with DVC for dataset versioning, ensuring full reproducibility of all
+  experiments
+\item Visualisation: Matplotlib for quantitative analysis outputs, Plotly for interactive 3D defect
+  maps
+\end{itemize}
+
+\mysection{3.11 Experimental Design Summary}
+\begin{table}[htbp]
+\centering
+\caption{Summary of experimental phases, methods, and acceptance criteria. Phase 3A/3B status
+  updated to reflect Part II's completion; all other statuses reproduced as of the April 2026
+  mid-term submission.}
+\label{tab:experimental_design}
+\small
+\begin{tabular}{p{1.0cm}p{3.0cm}p{5.4cm}p{2.8cm}}
+\toprule
+\textbf{Phase} & \textbf{Objective} & \textbf{Method} & \textbf{Status} \\
+\midrule
+1  & Literature synthesis & Systematic review & Complete \\
+2A & Preprocessing validation & Four-stage pipeline on NIST CoCr & Complete \\
+2B & Parameter sensitivity & NLM, BHC, ring filter tuning & Complete \\
+2C & Label generation & Two-stage Otsu + morphological cleaning & In progress \\
+2D & Baseline detection & Otsu vs.\ 2D U-Net & In progress \\
+2E & Loss function evaluation & BCE vs.\ Dice vs.\ Focal vs.\ combined & Planned \\
+3A & Generalisation evaluation & Additional datasets (PODFAM) & Complete (Part II) \\
+3B & Pipeline delivery & Documented Git repository & Complete (Part II) \\
+\bottomrule
+\end{tabular}
+\end{table}

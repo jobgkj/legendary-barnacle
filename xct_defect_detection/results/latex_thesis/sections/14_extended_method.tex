@@ -1,0 +1,182 @@
+% =============================================================================
+% Chapter 14: Method -- Part III (Extended Validation)
+% =============================================================================
+\mysection{Note on scope (Part III)}
+This part reports a later phase of work, conducted after the five/seven-sample PODFAM validation of
+Part II, that revisits several of that validation's design choices under controlled ablation: which
+loss function the detector is trained with, whether beam-hardening and ring-artefact correction help
+on PODFAM data as they did in Part I, whether the circular sample-boundary assumption can be safely
+replaced for non-circular parts, and what a genuinely held-out sample reveals about the detector's
+real generalisation. It also reports two analyses not tied to any single ablation: a gradient-based
+interpretability study of the trained detector, and a strengthening of the pipeline's external
+validation against independently published reference porosity. Every figure and table in this part
+was generated directly from the working pipeline during this phase; none of Part I's or Part II's own
+figures or numbers were re-run, re-verified, or altered here. Where this part's methodology differs
+materially from Part II, most importantly, the train/validation/test sample assignment described in
+Section~14.3 below, the difference is stated explicitly rather than silently merged with the Part II
+description.
+
+\mychapter{14. Method --- Extended Validation}
+
+\mysection{14.1 Scope and Relationship to Parts I and II}
+Three questions motivate this part, each building on a specific claim made without controlled
+comparison earlier in the thesis. First, Part II's detector (Section~9.6) used the combined Dice-Focal
+loss without comparing it against the alternatives Part I's Section~3.8 lists; Section~14.3 below
+reports a controlled four-way comparison on PODFAM data. Second, Part I's preprocessing pipeline
+(Section~3.3) includes beam-hardening correction (BHC) and ring-artefact suppression, but Part II's
+preprocessing (Section~9.2) omits both; Section~14.4 tests whether adding them to the PODFAM pipeline
+changes detector performance. Third, Part II's sample-boundary detection (Section~9.3) fits a single
+circular mask per volume, an assumption later found not to hold for two PODFAM samples
+(sample\_06/07) with non-circular, part-specific cross-sections; Section~14.5 replaces it with a
+shape-agnostic method for those samples specifically. A fourth strand, reported in
+Sections~14.8--14.10, is not an ablation of an earlier choice but new analysis: which parts of the
+trained network drive its output, and how strong is the thesis's external validation once the
+reference porosity source's own experimental grounding is checked.
+
+\mysection{14.2 Sample Set: Geometric Diversity and the Waygate Scanner}
+All PODFAM samples (Section~9.1) are Ti-6Al-4V, manufactured by laser powder bed fusion on an Aconity
+Two machine and scanned on a Waygate v\textbar tome\textbar x M~240 XCT system. The seven-sample set
+spans a deliberately varied range of cross-sectional geometry, from the circular cross-sections of
+sample\_01--05 to the hexagonal and other non-circular cross-sections of sample\_06 and sample\_07,
+included specifically to test the pipeline beyond a single clean cylindrical benchmark. This geometric
+diversity is the direct motivation for Section~14.5: a boundary-detection method that assumes a
+circular cross-section, adequate for sample\_01--05, systematically misdetects the true material
+boundary on sample\_06/07, either clipping real material at the corners of the hexagonal section or
+extending the mask past the true boundary into background, which is then misread as defect.
+
+\mysection{14.3 Loss-Function Ablation}
+Four loss-function configurations, binary cross-entropy (BCE), Dice, Focal, and combined Dice-Focal
+(the formulation used throughout Part II), are trained and compared under an otherwise identical
+configuration, isolating loss function as the only varying factor. \texttt{config.py}'s
+\param{TRAINING\_SAMPLES\_OVERRIDE} is pinned to the same four-sample list,
+\texttt{["sample\_02", "sample\_04", "sample\_03", "sample\_01"]}, most-voids-first, for every run.
+\texttt{pipeline.py}'s \texttt{split\_volumes()} assigns roles by rank position rather than by patch,
+the first \param{n\_train} names become training samples, the next \param{n\_val} become the single
+validation sample, and the remainder become the single held-out test sample, so with four samples and
+the pipeline's default 20\%/10\% val/test split this resolves to \textbf{sample\_02 and sample\_04
+pooled for training, sample\_03 for validation, and sample\_01 held out entirely for testing}. This is
+a whole-sample split, not a patch-level split within a shared pool: sample\_01, the same sample used
+as the held-out test role throughout Part II (Section~9.4), never contributes any patch to training
+or validation in any of the four runs. sample\_03, excluded from training in Part II as near-empty
+(Section~9.4), is used here in the validation role, since a near-empty sample is unsuitable for
+training but still usable to monitor convergence. All four runs otherwise use the training
+configuration of Section~9.6 unchanged: $256\times256$ patches with 50\% overlap, stratified 1:3
+foreground-to-background sampling, Adam optimisation at learning rate $4\times10^{-5}$, up to 50
+epochs with early stopping (patience 10 epochs), and best-checkpoint selection by validation Dice.
+Every run's total epoch count equals its best epoch plus exactly 10, confirming early stopping, rather
+than the 50-epoch cap, was the actual stopping condition in all four cases.
+
+\mysection{14.4 Preprocessing Ablation}
+The best-performing configuration from Section~14.3 is retrained with the four-stage Part I
+preprocessing pipeline (percentile normalisation, BHC, ring-artefact suppression, NLM denoising,
+Section~3.3) applied to the PODFAM volumes in place of Part II's narrower three-stage pipeline
+(Section~9.2), using the identical sample split described above. This isolates the marginal effect of
+BHC and ring suppression on PODFAM data specifically, since Part I's own parameter sensitivity
+analysis (Section~3.3.6) was conducted only on the NIST CoCr dataset and its conclusions were never
+previously tested on PODFAM's different scanner and material.
+
+\mysection{14.5 Shape-Aware Sample-Boundary Detection}
+For sample\_06 and sample\_07, the circular-fit boundary method (Section~9.3) is replaced with a
+sliding-window boundary scan that locates the sample surface by its local intensity peak along each
+scan line, without assuming any particular cross-sectional shape, followed by taking the largest
+connected component of the resulting interior region and eroding it by a fixed margin
+(\param{erosion\_radius} = 35~px) to exclude partial-volume edge pixels. The erosion margin was
+selected by a parameter sweep (25, 30, 35, and 40~px), the false boundary artefact it is designed to
+remove shrinks smoothly and predictably as the margin increases across this range, and 35~px was the
+value visually verified to fully remove the artefact, described in Section~15.3, without eroding
+genuine material at the sample interior. A hybrid fallback is required for a minority of slices near
+the top and bottom of a volume, where support-structure content rather than open air surrounds the
+part: on these transition slices, the primary fixed-threshold detector can fail to find any background
+at all (an apparent mask coverage near 100\%), triggering a per-slice adaptive-Otsu re-estimate for
+that slice only. This fallback is not fully closed as an edge case, see Section~17 for the specific
+failure mode it can itself produce on very high-porosity content. For sample\_01--05, the original
+circular-fit method (Section~9.3) is retained unchanged, since it already performs correctly on these
+genuinely circular samples; sample\_05 specifically requires a fixed intensity threshold rather than
+adaptive Otsu for its own boundary fit, because its unusually high porosity (Section~9.5,
+Table~\ref{tab:podfam_classical}) leaves too few solid-material pixels for Otsu's two-class assumption
+to separate correctly, a sample-content-dependent choice rather than a universal preference for one
+threshold strategy over the other.
+
+\mysection{14.6 A Documented Negative Result: Canny Edge Detection}
+Canny edge detection with morphological closing was investigated as a further alternative to both the
+circular-fit and shape-aware boundary methods, restricted to boundary detection only (it was not
+carried forward into any trained-model comparison). On sample\_01--05, its results closely reproduce
+the production circular-fit numbers (Section~15.3), confirming those results independently rather than
+replacing them. On sample\_06/07, it exhibits a specific and confirmed failure mode on a small number
+of slices: rather than following the true material boundary, it confidently traces the edge of the
+surrounding support scaffold instead, producing a boundary that looks well-formed rather than an
+obvious error. Investigation traced this to the underlying image signal itself: at the specific slices
+where the failure occurs, the material-to-background intensity contrast has genuinely faded to
+approximately the same strength as the scaffold's own edge contrast, so no threshold, smoothing
+parameter, or shape heuristic (solidity, area continuity, and brightness were each tried as
+tie-breakers) can reliably distinguish the two closed shapes from the image content alone. This is
+reported as a negative result specifically because the cause is a property of the data at those depths
+rather than a fixable implementation choice; the shape-aware method of Section~14.5 remains the
+production method for sample\_06/07 for this reason.
+
+\mysection{14.7 Background-Masking Correction for Detector Inference}
+A separate defect, found by inspecting the trained detector's predictions on sample\_07 (an
+out-of-distribution inference check, not part of the training or validation roles of
+Section~14.3), was that the network produced implausible defect predictions on slices with little or
+no metal in frame, near-empty transition and support-structure slices the training data never
+specifically taught it to recognise as background. The fix applies the same shape-aware boundary
+detector used in Section~14.5 to zero out background both before the trained network sees a slice and
+again on its predicted output, rather than relying on the network to infer the sample boundary
+implicitly from intensity alone.
+
+\mysection{14.8 Conv-Block Attribution Analysis}
+To identify which stages of the trained 2D U-Net (architecture per Section~3.7.1, verified by direct
+instantiation to have exactly 31,037,633 trainable parameters) contribute most to the defect decision,
+a forward hook is registered on every convolutional block's output (four encoder blocks, the
+bottleneck, and four decoder blocks, nine blocks total), and \texttt{retain\_grad()} is called on each
+hooked output. A forward and backward pass is run on a representative $256\times256$ crop from
+sample\_02 (14.27\% genuine Bernsen-labelled defect content), with the scalar objective
+$\sum(\hat{y} \odot y)$, the predicted defect probability map $\hat{y}$ elementwise-multiplied by the
+Bernsen ground-truth mask $y$ and summed, backpropagated to populate every hooked block's gradient.
+Each block's relative contribution is then computed as the mean absolute value of activation times
+gradient, $\overline{|a \cdot \nabla a|}$, at that block, normalised across all nine blocks to sum to
+100\%. This is a single representative crop and a single attribution method, gradient$\times$activation
+is a simple, interpretable choice but not the only one available, so the result reported in
+Section~15.6 is directional evidence about where the network's decision-relevant signal concentrates,
+not an exhaustive architectural study. The analysis is run on the checkpoint identified in
+Section~14.3 as the strongest of the four loss-function configurations (BCE), verified to be the
+correct checkpoint by an exact match between its own recorded validation Dice and best epoch
+(0.7275 at epoch 13) and the same figures reported independently for the loss-ablation's BCE run.
+
+\mysection{14.9 External Validation Against Independently Published Porosity}
+Otsu, Yen, and Bernsen thresholding are each compared, per NIST CoCr sample, against the porosity
+values independently published by Kim et al.~\citep{Kim2017} for the same physical samples, using the
+Pearson correlation coefficient $r$ across the five samples in common. This validates the classical
+methods against a source external to this pipeline, rather than against another output of the same
+pipeline. A further check was made of Kim et al.'s own reference values themselves: their paper
+reports cross-validating their XCT-derived porosity against an independent gravimetric (density-based)
+method, computed from measured disk mass and cobalt-chrome's nominal density, for several of their
+samples, with the two methods agreeing to within 1--4\% absolute and an XCT-side threshold-sensitivity
+uncertainty below $\pm 0.12\%$~\citep{Kim2017}. This means the reference this thesis's own $r$ value is
+measured against is not itself only another XCT measurement, it carries independent physical grounding
+one step back. This gravimetric cross-check in Kim et al.'s own paper was reported for specific samples
+(their own sample numbering 2, 4, 5, and 6); it has not been independently confirmed here that every
+one of the five NIST samples used in this thesis's correlation individually received that exact check,
+as opposed to being reported as part of their broader dataset characterisation, and this caveat is
+carried into the results and limitations of this part accordingly.
+
+\mysection{14.10 Physical Voxel-Size Determination}
+\texttt{config.py}'s \param{PIXEL\_SIZE\_UM} constant, which converts pixel-based measurements
+elsewhere in this pipeline to physical units, was never calibrated to either dataset's actual scan
+resolution and remains at its unfilled placeholder value of 1.0 (Section~12); this part reports the
+actual physical scale for both datasets as a measurement, without editing that constant in the running
+pipeline. For PODFAM, the raw TIFF files for sample\_06 and sample\_07 carry embedded
+\texttt{XResolution}/\texttt{YResolution} metadata tags, read directly from the file headers, giving a
+consistent voxel size of 12.001~\textmu m/px for both samples. For the NIST CoCr samples, the raw TIFF
+files carry no equivalent spatial metadata (only an ImageJ-style intensity min/max in each file's
+\texttt{ImageDescription} field), so the voxel size is instead taken from the dataset's own published
+documentation~\citep{NIST_CoCr}, which states a nominal voxel size of approximately 2.5~\textmu m for
+most samples in the set, with samples 3 and 5 specifically scanned at a substantially finer 0.87~\textmu
+m. This roughly threefold difference in resolution for exactly the two samples this thesis already
+excludes from training, sample\_03 as near-empty and sample\_05 for the DCT labelling artefact
+(Sections~9.4, 9.5), is noted in Section~16 as a plausible, previously unidentified explanation worth
+stating explicitly, a finer voxel size implies a smaller physical field of view per slice for the same
+pixel dimensions, which could plausibly affect both the amount of defect content captured and the
+image's intensity/contrast profile. This is reported here as a hypothesis consistent with the
+available evidence, not as a confirmed causal finding; it has not been independently tested against
+the two samples' actual field-of-view dimensions or intensity statistics within this work.

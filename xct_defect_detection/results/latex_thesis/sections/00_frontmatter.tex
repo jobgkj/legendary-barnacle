@@ -1,0 +1,121 @@
+% =============================================================================
+% Note on this combined document, Summary, Preface, Affirmation
+% =============================================================================
+
+\mysection{Note on this combined document}
+This document combines two things produced at different points in the same thesis project.
+Part I (Chapters 1--6 and Appendices A--B) is the master thesis mid-term report as submitted on
+April 26, 2026, covering method development and preliminary results on the NIST CoCr AM XCT
+benchmark dataset (\texttt{set1sample2raw}). Its content is reproduced essentially verbatim from that
+submission. Part II (Chapters 7--13) is the PODFAM validation phase chapter, completed after the
+mid-term and reporting full-volume results on real PODFAM process-monitoring XCT data, a separate
+piece of work using a different pseudo-labelling method (Bernsen instead of two-stage Otsu), added
+here as a continuation rather than a rewrite of Part I.
+
+Three specific values in Part I were found, while preparing this combined document, to no longer
+match the working codebase's actual configuration and have been corrected here rather than left
+silently wrong: the NLM denoising filter-strength factor (Section~3.3.4, Appendix~B), the
+validation/test split percentages (Section~3.2.2, Appendix~B), and the checkpoint output directory
+name (Appendix~B). Each correction is marked in place. Appendix A's repository structure has also
+been updated to reflect the codebase's current layout, which has been substantially restructured
+(a \url{src/} package and a \url{scripts/} entry-point folder were introduced) since the
+mid-term submission; the original Appendix A tree described an earlier, now-superseded layout.
+Chapter 4's figures (4.1--4.12) are retained as captioned placeholders --- the specific NIST-phase
+source images referenced by those captions are not present in the current repository state and have
+not been regenerated for this document, since doing so was outside the scope of what was requested;
+the PODFAM phase's own figures (Part II) are all freshly generated from the current pipeline and are
+embedded in full. All other content in Part I, including its reported quantitative results, is
+reproduced as originally submitted and was not re-verified against a pipeline re-run.
+
+The bibliography at the end of Part I has been extended into a single, deduplicated reference list
+covering both parts; in-text citations within Part II use the same shared \texttt{references.bib}
+file as Part I, so every citation in this document resolves through one numbered list.
+
+\clearpage
+\mysection{Summary}
+This master's thesis develops and validates an automated pipeline for the detection of internal
+defects in metal additive manufacturing (AM) components using X-ray Computed Tomography (XCT) data.
+The work addresses a critical industrial challenge: the reliable and scalable identification of gas
+porosity, lack-of-fusion voids, and micro-cracks in high-resolution XCT volumes acquired from
+components fabricated by laser powder bed fusion (LPBF).
+
+The primary dataset is the NIST CoCr AM XCT benchmark dataset (\texttt{set1sample2raw}), comprising
+900 slices at $1010 \times 980$ pixel resolution with a raw intensity range of $[0, 59631]$. No
+expert-annotated ground truth masks are available for this dataset; defect detection labels are
+therefore generated automatically using a two-stage Otsu thresholding strategy applied within the
+metal component region only, followed by morphological cleaning and connected component filtering.
+
+A four-stage preprocessing pipeline has been implemented and fully validated on the complete
+900-slice dataset in 578.5 seconds on CPU. The pipeline comprises percentile normalisation,
+polynomial beam hardening correction (degree 3), polar-coordinate ring artefact suppression (radius
+15 pixels), and non-local means denoising ($h = 0.6 \times \hat{\sigma}$, adaptive per slice ---
+corrected from the mid-term submission's stated value; see the Note on this combined document). The
+pipeline achieves a noise standard deviation reduction from 20952 to 0.385, a factor of
+$\times 54{,}500$, and an SNR improvement from 1.756 to 1.773. A systematic parameter sensitivity
+analysis across NLM filter strength, BHC polynomial degree, and ring filter radius confirms the
+selected configuration as the optimal operating point for this dataset.
+
+Patch extraction ($256 \times 256$ pixels, 50\% overlap, stratified 1:3 foreground-to-background
+sampling) and a six-transform data augmentation pipeline have been implemented and validated on the
+NIST CoCr data, producing 15,840 patches at $64 \times 64$ and 3,860 patches at $128 \times 128$ from
+20 sampled slices.
+
+A 2D U-Net detection model has been implemented in PyTorch and initial training on the automatically
+generated labels is underway. After 20 training epochs, the combined Dice-Focal loss formulation
+achieves a validation Dice score of 0.68, compared to 0.41 for the standard binary cross-entropy
+baseline and 0.38 for the Otsu label generator itself. This confirms that the U-Net is already
+generalising beyond the capability of its own training labels, the fundamental goal of the
+pseudo-label approach.
+
+The complete pipeline is version-controlled on GitHub, tracked with MLflow, and produces thesis-ready
+quantitative outputs including intensity histograms, SNR plots, parameter tuning comparisons, patch
+extraction grids, and augmentation validation figures.
+
+This mid-term summary is extended, in Part II of this document, by a completed validation phase on
+real PODFAM metal AM XCT data: full-volume classical-threshold comparison across up to seven samples,
+a 2D U-Net trained on Bernsen pseudo-labels with defect-content-ranked sample selection (best
+validation Dice 0.600), held-out test evaluation, and an additional out-of-distribution inference
+check that surfaced and diagnosed a reproducible Bernsen calibration failure mode.
+
+\clearpage
+\mysection{Preface}
+This thesis is carried out as a degree project for the Master of Engineering Science with a
+specialization in Robotics and Automation at the Department of Engineering Science, University West,
+Sweden. The work was conducted within the PODFAM research project during the spring semester of
+2026, under the supervision of Amit Kumar Mishra and examination by Yongcui Mi.
+
+The project was initiated with the goal of developing an automated pipeline for defect detection in
+additively manufactured (AM) metal components using X-ray computed tomography (XCT) data. For model
+development, I used benchmark datasets from the National Institute of Standards and Technology (NIST
+AM Bench), which provided diverse and well-annotated XCT scans suitable for training deep learning
+models. To ensure industrial relevance and robustness, the trained models were subsequently tested on
+PODFAM project datasets, consisting of XCT volumetric scans of AM metal parts collected within
+ongoing process monitoring research at University West.
+
+I would like to express my sincere gratitude to my supervisor, Prof. Amit Kumar Mishra and Prof.
+Karthikeyan Thalavai Pandian for his continuous guidance, constructive feedback, and invaluable
+support throughout the project. His expertise in machine learning and industrial automation has been
+instrumental in shaping the direction of this work. I also extend my thanks to my examiner, Yongcui
+Mi, for her insightful comments and encouragement during the course of the thesis.
+
+I am grateful to the PODFAM project team and collaborators for their engagement and for providing
+access to XCT data and domain expertise, which greatly enhanced the practical impact of this
+research. Special thanks also go to the Department of Engineering Science at University West for
+providing the resources, facilities, and academic environment that made this work possible.
+
+Finally, I would like to thank my family and friends for their patience, encouragement, and
+unwavering support throughout my studies.
+
+\clearpage
+\mysection{Affirmation}
+This master degree report, \emph{Automated XCT Data Analysis for Defect Detection in Additively
+Manufactured Metal Parts}, was written as part of the master degree work needed to obtain a Master of
+Science with specialization in Robotics degree at University West. All material in this report that
+is not my own is clearly identified and used in an appropriate and correct way. The main part of the
+work included in this degree project has not previously been published or used for obtaining another
+degree.
+
+\vspace{2cm}
+\noindent Job George Konnoth Joseph \hfill Date: April 26, 2026
+
+\clearpage

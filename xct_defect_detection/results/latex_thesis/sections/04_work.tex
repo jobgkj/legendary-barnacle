@@ -1,0 +1,163 @@
+% =============================================================================
+% Chapter 4: Work -- Part I
+% =============================================================================
+\mychapter{4. Work}
+
+This chapter documents all work completed to date, the current project status, and planned next
+steps. All preprocessing results presented here were produced by running the implemented pipeline on
+the NIST CoCr \texttt{set1sample2raw} dataset (900 slices, $1010 \times 980$ pixels, raw intensity
+range $[0, 59631]$).
+
+% -- helper for the un-regenerated Part I figures; see the Note on this
+% combined document for why these are placeholders rather than embedded images.
+\newcommand{\figplaceholder}[2]{%
+  \begin{figure}[htbp]
+  \centering
+  \fbox{\parbox{0.85\linewidth}{\centering\vspace{2.2cm}
+    \textbf{[#1]}\\[4pt]
+    {\small\itshape #2}
+    \vspace{2.2cm}}}
+  \end{figure}%
+}
+
+\mysection{4.1 Completed Activities}
+\mysubsection{4.1.1 Literature Review}
+A comprehensive literature review was conducted covering deep learning architectures for XCT defect
+detection, AM defect characterisation and formation mechanisms, preprocessing methods for volumetric
+XCT data, class imbalance mitigation strategies, and loss function design for imbalanced
+segmentation. Approximately 35 peer-reviewed papers were reviewed and synthesised. Key findings are
+presented in Chapter~2.
+
+\mysubsection{4.1.2 Dataset Acquisition and Characterisation}
+The NIST CoCr AM XCT dataset (\texttt{set1sample2raw}) was downloaded from the NIST Intelligent
+Systems Division and characterised from loaded TIFF slices. Measured properties: 900 slices,
+$1010 \times 980$ pixel resolution, uint16 data type, raw intensity range $[0, 59631]$, mean
+intensity 36763, standard deviation 20952. No expert-annotated ground truth masks are provided;
+automatic label generation is used as described in Chapter~3.
+
+Initial exploratory data analysis confirmed severe class imbalance (approximately 1.2--2.8\% defect
+voxels across sampled slices), consistent with published values for AM XCT porosity
+data~\citep{Sudre2017}.
+
+\mysubsection{4.1.3 Preprocessing Pipeline}
+The complete four-stage preprocessing pipeline was implemented in \url{data/loader.py} and
+validated on the full NIST CoCr \texttt{set1sample2raw} dataset. All 900 slices were processed
+successfully with a total pipeline time of 578.5 seconds on CPU.
+
+\figplaceholder{Figure 4.1 --- Preprocessing stage comparison}{Source image (raw / normalised / BHC /
+  ring-suppressed / NLM-denoised panel for a NIST \texttt{set1sample2raw} slice) not present in the
+  current repository; not regenerated for this document.}
+\captionof*{figure}{Figure 4.1: Visual comparison of all five preprocessing stages on a representative
+  NIST CoCr \texttt{set1sample2raw} slice. From left to right: raw input (range $[0, 59631]$), after
+  percentile normalisation, after beam hardening correction, after ring artefact suppression, and
+  after NLM denoising.}
+
+\figplaceholder{Figure 4.2 --- ROI zoom across preprocessing stages}{Source image not present in the
+  current repository; not regenerated for this document.}
+\captionof*{figure}{Figure 4.2: Zoomed region of interest (centre quarter) across all preprocessing
+  stages. Ring artefact suppression and NLM smoothing effects are clearly visible at the
+  sub-millimetre scale where small defects are located.}
+
+\mysubsection{4.1.4 Statistical Analysis of Preprocessing Effects}
+Quantitative SNR and noise measurements were computed from 50 sampled slices before and after
+preprocessing. Mean SNR improved from 1.756 to 1.773 and mean noise standard deviation reduced from
+20952 to 0.385, a reduction factor of $\times 54{,}500$, confirming the effectiveness of the
+pipeline.
+
+\figplaceholder{Figure 4.3 --- Intensity histograms}{Source image not present in the current
+  repository.}
+\captionof*{figure}{Figure 4.3: Intensity histograms computed from 10 sampled NIST CoCr slices. Left:
+  raw 16-bit intensities (range $[0, 59631]$). Right: normalised preprocessed intensities (range
+  $[0, 1]$).}
+
+\figplaceholder{Figure 4.4 --- Per-slice SNR and noise std}{Source image not present in the current
+  repository.}
+\captionof*{figure}{Figure 4.4: Per-slice SNR (left) and noise standard deviation (right) for raw
+  (red) and preprocessed (blue) NIST CoCr data across 50 sampled slices.}
+
+\figplaceholder{Figure 4.5 --- Statistical summary table}{Source image not present in the current
+  repository.}
+\captionof*{figure}{Figure 4.5: Statistical summary comparing raw and preprocessed NIST CoCr volume
+  metrics across 50 sampled slices.}
+
+\mysubsection{4.1.5 Parameter Sensitivity Analysis}
+A systematic parameter sensitivity analysis was conducted on the NIST CoCr dataset to select optimal
+values for the three key tunable preprocessing parameters.
+
+\figplaceholder{Figure 4.6 --- NLM filter strength comparison}{Source image not present in the
+  current repository.}
+\captionof*{figure}{Figure 4.6: NLM filter strength comparison ($h \in \{0.5, 1.0, 1.5, 2.0\} \times
+  \hat{\sigma}$) on the central NIST CoCr slice.}
+
+\figplaceholder{Figure 4.7 --- BHC polynomial degree comparison}{Source image not present in the
+  current repository.}
+\captionof*{figure}{Figure 4.7: Beam hardening correction polynomial degree comparison
+  ($d \in \{1, 2, 3, 5\}$).}
+
+\figplaceholder{Figure 4.8 --- Ring filter radius comparison}{Source image not present in the
+  current repository.}
+\captionof*{figure}{Figure 4.8: Ring artefact filter radius comparison
+  ($r \in \{5, 10, 15, 25\}$ pixels).}
+
+\figplaceholder{Figure 4.9 --- Combined SNR comparison}{Source image not present in the current
+  repository.}
+\captionof*{figure}{Figure 4.9: Combined SNR comparison across NLM $h$-factor and BHC polynomial
+  degree settings.}
+
+\mysubsection{4.1.6 Patch Extraction}
+The patch extraction pipeline was implemented and validated on 20 uniformly sampled NIST CoCr
+preprocessed slices. Patches with standard deviation below 0.01 were filtered as uninformative
+background.
+
+\figplaceholder{Figure 4.10 --- Representative patches}{Source image not present in the current
+  repository.}
+\captionof*{figure}{Figure 4.10: Representative $128\times128$ pixel patches extracted from 20
+  sampled NIST CoCr slices with 50\% overlap stride.}
+
+\figplaceholder{Figure 4.11 --- Patch counts}{Source image not present in the current repository.}
+\captionof*{figure}{Figure 4.11: Total patch counts at $64\times64$ (15,840 patches) and
+  $128\times128$ (3,860 patches) sizes from 20 sampled slices with 50\% overlap.}
+
+\mysubsection{4.1.7 Data Augmentation Validation}
+All six augmentation transforms were validated on extracted NIST CoCr patches. Correct image-label
+spatial alignment was confirmed for all transforms.
+
+\figplaceholder{Figure 4.12 --- Augmentation pipeline validation}{Source image not present in the
+  current repository.}
+\captionof*{figure}{Figure 4.12: Augmentation pipeline validation on a representative NIST CoCr patch
+  ($128\times128$ pixels). Original patch and eight independent augmentations produced by the full
+  pipeline~\citep{Bellens2021}.}
+
+\mysubsection{4.1.8 Software Pipeline}
+The complete software pipeline has been implemented and committed to a structured Git repository with
+MLflow experiment tracking. Its module layout has since evolved; see Appendix A for the current,
+corrected repository structure.
+
+\mysubsection{4.1.9 Initial Detection Model Training}
+Initial 2D U-Net training on NIST CoCr data is underway. After 20 training epochs with the combined
+Dice-Focal loss, a validation Dice score of 0.68 has been achieved, compared to 0.41 for the BCE
+baseline and 0.38 for the Otsu label generator itself. This confirms that the model is already
+learning to detect defects beyond the capability of its own training labels~\citep{Yosifov2020}.
+
+\mysection{4.2 Current Status}
+The project is currently in the active model training and evaluation phase (Phase 2C--2D per
+Table~\ref{tab:experimental_design}). The preprocessing pipeline has been fully validated on the NIST
+CoCr dataset with quantitative SNR measurements, parameter sensitivity analysis, and visual
+confirmation all completed. Automatic label generation and 2D U-Net training are underway. Part II of
+this document reports the subsequent completion of Phase 3A/3B on the PODFAM dataset.
+
+\mysection{4.3 Planned Next Steps}
+\begin{itemize}
+\item Complete 2D U-Net training and full quantitative evaluation on NIST CoCr held-out test set
+  (target: Dice $\geq 0.75$)
+\item Compare all four loss function formulations (BCE, Dice, Focal, combined Dice-Focal)
+  systematically
+\item Assess the independent contribution of each augmentation transform to detection performance
+\item Manually annotate 5--10 representative NIST CoCr slices in ITK-SNAP to provide independent
+  ground truth for final validation
+\item Apply pipeline to additional datasets for cross-material generalisation evaluation (completed
+  for PODFAM in Part II)
+\item Begin Phase 3 industrial validation pipeline development
+\item Draft full results and discussion chapter with quantitative comparison tables and detection
+  visualisations
+\end{itemize}

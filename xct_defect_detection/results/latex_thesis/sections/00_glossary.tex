@@ -1,0 +1,67 @@
+% =============================================================================
+% Symbols and glossary
+% =============================================================================
+\mysection{Symbols and glossary}
+
+\begin{description}[leftmargin=2.6cm, style=nextline]
+\item[AM] Additive Manufacturing --- a process of building components layer by layer from metallic
+  powder or wire feedstock using a laser or electron beam.
+\item[LPBF] Laser Powder Bed Fusion --- the most common AM process, where a laser selectively melts
+  successive layers of powder spread across a build platform.
+\item[DED] Directed Energy Deposition --- an AM process using focused energy to melt material as it
+  is deposited.
+\item[EBM] Electron Beam Melting --- an AM process using an electron beam as the energy source.
+\item[XCT] X-ray Computed Tomography --- a non-destructive imaging technique that reconstructs the
+  three-dimensional internal structure of a component from a series of 2D X-ray projections.
+\item[NIST] National Institute of Standards and Technology --- the US federal agency that provides
+  the CoCr AM XCT benchmark dataset used for training and evaluation in this thesis.
+\item[CNN] Convolutional Neural Network --- a deep learning architecture widely used for image
+  analysis tasks, including defect detection in XCT data.
+\item[U-Net] A deep learning architecture with a symmetric encoder-decoder structure and skip
+  connections, used in this thesis as the primary defect detection model.
+\item[NLM] Non-Local Means --- a denoising algorithm that replaces each voxel intensity with a
+  weighted average of similar voxels in a search window, preserving defect boundaries while
+  suppressing noise.
+\item[BHC] Beam Hardening Correction --- a preprocessing step that removes the systematic intensity
+  gradient caused by differential X-ray attenuation in dense metal components.
+\item[SNR] Signal-to-Noise Ratio --- a quantitative measure of image quality used to evaluate the
+  effectiveness of each preprocessing stage.
+\item[GPU/CPU] Graphics Processing Unit / Central Processing Unit --- hardware used for training and
+  running deep learning defect detection models.
+\item[FAIR] Findable, Accessible, Interoperable, Reusable --- principles for data stewardship ensuring
+  long-term usability and reproducibility of datasets and pipeline outputs.
+\item[DVC] Data Version Control --- a tool used alongside Git to version control large XCT datasets
+  and ensure reproducibility of all experiments.
+\item[MLflow] An open-source platform used for experiment tracking, logging hyperparameters, metrics,
+  and model checkpoints across all training runs.
+\item[LoF] Lack-of-Fusion --- a type of internal defect in AM components caused by insufficient
+  energy density during fabrication, resulting in irregularly shaped voids with sharp
+  stress-concentrating features.
+\item[Gas Porosity] A type of internal defect in AM components formed by entrapped gas in the melt
+  pool, typically spherical with diameters ranging from 1 to 500 micrometres.
+\item[Otsu Threshold] An automatic global thresholding method that maximises inter-class intensity
+  variance. Used in this thesis as both a classical detection baseline and an automatic label
+  generator.
+\item[Pseudo-Label] An automatically generated binary detection label produced by classical
+  thresholding (Otsu for the NIST phase, Bernsen for the PODFAM phase), used as training supervision
+  in the absence of expert-annotated ground truth.
+\item[Dice Coefficient] A detection accuracy metric measuring the overlap between predicted and
+  reference defect regions, ranging from 0 (no overlap) to 1 (perfect overlap).
+\item[IoU] Intersection over Union --- a detection accuracy metric measuring the ratio of overlap to
+  union between predicted and reference defect regions.
+\item[BCE] Binary Cross-Entropy --- a standard loss function for binary classification tasks. Shown
+  to cause class collapse on severely imbalanced XCT defect data when used alone.
+\item[Dice-Focal Loss] The combined loss function used in this thesis, combining Dice loss and Focal
+  loss with equal weighting to address severe class imbalance in XCT defect detection.
+\item[Patch Extraction] The process of dividing full XCT slices into fixed-size sub-images
+  ($256 \times 256$ pixels in this thesis) for input to the detection model.
+\item[ReLU] Rectified Linear Unit --- the activation function used in the encoder and decoder stages
+  of the U-Net, introducing non-linearity at low computational cost.
+\item[$\mu$m] Micrometre --- unit of length used to describe defect sizes and XCT voxel dimensions.
+  $1\,\mu\text{m} = 10^{-6}$ metres.
+\item[$10^6$ K/s] Cooling rate in Kelvin per second, typical of rapid solidification dynamics in LPBF
+  additive manufacturing processes.
+\item[Bernsen / DCT / LCT] Bernsen local adaptive thresholding, used as the primary pseudo-label
+  method for the PODFAM phase (Part II). DCT (dynamic contrast threshold) and LCT (local contrast)
+  are its two governing parameters, defined in Section~9.3.
+\end{description}
