@@ -130,12 +130,17 @@ def generate_masks(sample_name: str, tiff_files_raw: list):
         print(f"  [{sample_name}] no preprocessed files found, skipping masks")
         return
 
-    print(f"  [{sample_name}] detecting sample boundary mask...")
-    first = tiff.imread(proc_files[0])
-    h, w = first.shape
-    cx, cy, radius, erosion_radius = detect_sample_mask_stack(tiff_files_raw)
-    sample_mask = build_circle_mask(h, w, cx, cy, radius, erosion_radius)
-    print(f"  [{sample_name}] sample mask: centre=({cx:.1f},{cy:.1f}) radius={radius:.1f}")
+    sample_mask = None
+    if config.USE_SAMPLE_MASK:
+        print(f"  [{sample_name}] detecting sample boundary mask...")
+        first = tiff.imread(proc_files[0])
+        h, w = first.shape
+        cx, cy, radius, erosion_radius = detect_sample_mask_stack(tiff_files_raw)
+        sample_mask = build_circle_mask(h, w, cx, cy, radius, erosion_radius)
+        print(f"  [{sample_name}] sample mask: centre=({cx:.1f},{cy:.1f}) radius={radius:.1f}")
+    else:
+        print(f"  [{sample_name}] sample mask disabled (config.USE_SAMPLE_MASK=False) "
+              "— thresholding full slice")
 
     for method_name, fn in [("otsu", otsu), ("yen", yen), ("bernsen", bernsen)]:
         out_dir = MASKS_OUT / sample_name / method_name

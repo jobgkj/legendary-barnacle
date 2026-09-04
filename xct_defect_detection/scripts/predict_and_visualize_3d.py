@@ -29,6 +29,7 @@ Run from repository root:
 """
 import sys
 import argparse
+import warnings
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -54,6 +55,7 @@ from config import create_dirs, PATCH_SIZE, PATCH_STRIDE, DICE_THRESHOLD, DEVICE
 from data.cache import load_cache
 from models.unet2d import get_model
 from pipeline import select_training_samples
+from src.sample_mask import detect_sample_mask
 
 INFER_BATCH_SIZE = 32
 PRED_DIR    = config.REPO_ROOT / "results" / "unet_predictions" / EXPERIMENT_NAME
@@ -71,6 +73,32 @@ def _patch_grid(h: int, w: int, p: int, s: int) -> list[tuple[int, int]]:
     return [(y, x) for y in ys for x in xs]
 
 
+def _slice_shape_mask(img01: np.ndarray) -> np.ndarray:
+    """
+    Shape-aware "inside sample" mask for one slice (float32 in [0,1]).
+    Same hybrid logic as scripts/regenerate_masks_shape_aware_full.py:
+    fixed air_threshold=30 first, falling back to a per-slice adaptive
+    Otsu threshold only when the fixed one implausibly finds ~no
+    background (>95% coverage) — the known failure mode on transition
+    slices near the top/bottom of a scan (support structure rather than
+    open air). Returns a bool array, True = inside the sample.
+    """
+    img_u8 = (img01 * 255.0).clip(0, 255).astype(np.uint8)
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("ignore")
+        try:
+            mask = detect_sample_mask(img_u8, return_circle=False)
+        except ValueError:
+            # No sample region detected at all -- nothing to keep.
+            return np.zeros(img01.shape, dtype=bool)
+    if float(mask.mean()) > 0.95:
+        try:
+            mask = detect_sample_mask(img_u8, return_circle=False, adaptive_threshold=True)
+        except ValueError:
+            return np.zeros(img01.shape, dtype=bool)
+    return mask.astype(bool)
+
+
 def predict_volume(model, volume: np.ndarray, device: torch.device) -> np.ndarray:
     """
     Sliding-window inference over every slice of `volume` (N, H, W) float32
@@ -80,6 +108,14 @@ def predict_volume(model, volume: np.ndarray, device: torch.device) -> np.ndarra
     a volume edge clamped rather than zero-padded. Overlapping patch
     predictions are averaged before thresholding. Returns a uint8 binary
     mask volume of the same shape.
+
+    Background (air / support structure outside the part) is zeroed out
+    of the input BEFORE the U-Net sees it, and masked out of the output
+    prediction again afterwards — on slices with little or no metal in
+    frame (e.g. transition slices near the top/bottom of a scan), the
+    network was observed to produce spurious "defect" predictions on
+    that background; both the mask on the input and the belt-and-suspenders
+    mask on the output prevent that region from ever contributing.
     """
     n, h, w = volume.shape
     p, s = PATCH_SIZE, PATCH_STRIDE
@@ -87,17 +123,27 @@ def predict_volume(model, volume: np.ndarray, device: torch.device) -> np.ndarra
     half = UNET_INPUT_SLICES // 2
 
     mask_vol = np.zeros((n, h, w), dtype=np.uint8)
+    n_masked_slices = 0
 
     with torch.no_grad():
         for i in range(n):
+            shape_mask = _slice_shape_mask(np.asarray(volume[i], dtype=np.float32))
+            if not shape_mask.any():
+                # Nothing identifiable as sample on this slice -- skip
+                # inference entirely, leave it as all-background (0).
+                n_masked_slices += 1
+                if (i + 1) % 50 == 0 or (i + 1) == n:
+                    print(f"      Inferred {i+1}/{n} slices ...", end="\r")
+                continue
+
             neighbour_idxs = [
                 int(np.clip(i + offset, 0, n - 1))
                 for offset in range(-half, half + 1)
             ]
             slc_stack = np.stack(
-                [np.asarray(volume[j], dtype=np.float32) for j in neighbour_idxs],
+                [np.asarray(volume[j], dtype=np.float32) * shape_mask for j in neighbour_idxs],
                 axis=0
-            )  # (N, H, W)
+            )  # (N, H, W) -- background zeroed before the model sees it
 
             prob_sum = np.zeros((h, w), dtype=np.float32)
             count    = np.zeros((h, w), dtype=np.float32)
@@ -115,11 +161,15 @@ def predict_volume(model, volume: np.ndarray, device: torch.device) -> np.ndarra
                     count[y:y+p, x:x+p]    += 1.0
 
             prob = prob_sum / np.maximum(count, 1e-6)
-            mask_vol[i] = (prob >= DICE_THRESHOLD).astype(np.uint8)
+            pred_mask = (prob >= DICE_THRESHOLD).astype(np.uint8)
+            mask_vol[i] = pred_mask * shape_mask  # belt-and-suspenders on the output too
 
             if (i + 1) % 50 == 0 or (i + 1) == n:
                 print(f"      Inferred {i+1}/{n} slices ...", end="\r")
     print()
+    if n_masked_slices:
+        print(f"      [Note] {n_masked_slices} slice(s) had no detectable sample region "
+              f"-- inference skipped, left as background.")
 
     return mask_vol
 
@@ -253,7 +303,25 @@ def visualize_3d(sample_name: str, volume: np.ndarray, mask_vol: np.ndarray) -> 
     save_fig(fig, FIGURE_DIR / f"{sample_name}_unet_3d_mesh.png")
 
     # ── 2. Defect scatter ────────────────────────────────────────────────
-    pz, py, px = np.where(defect_mask)
+    # np.where(defect_mask) materialises one int64 coordinate per True
+    # voxel BEFORE any subsampling -- fine for real (sparse) pore volumes,
+    # but a badly-generalising model can flag a large fraction of the
+    # whole volume as "defect" (seen on out-of-distribution samples),
+    # which then tries to allocate tens of GB just for those coordinates.
+    # Stride the mask down first so the candidate-point count stays
+    # bounded regardless of how much of the volume is flagged, then
+    # randomly subsample as before -- this is a scatter visualisation,
+    # not a precision measurement, so coarse striding is fine.
+    n_defect = int(defect_mask.sum())
+    stride = 1
+    while n_defect / (stride ** 3) > 2_000_000 and stride < 16:
+        stride *= 2
+    if stride > 1:
+        print(f"      [Note] {n_defect:,} defect voxels — striding by {stride}x "
+              f"before building the scatter plot to keep it renderable.")
+    strided_mask = defect_mask[::stride, ::stride, ::stride]
+    pz, py, px = np.where(strided_mask)
+    pz, py, px = pz * stride, py * stride, px * stride
     if len(pz) > 0:
         if len(pz) > 20_000:
             rng = np.random.default_rng(42)

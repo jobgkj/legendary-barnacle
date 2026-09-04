@@ -89,7 +89,13 @@ MASKS_DIR          = Path(os.environ.get("XCT_MASKS_DIR", str(REPO_ROOT / "data"
 CKPT_DIR    = REPO_ROOT / "artifacts"
 FIGURES_DIR = REPO_ROOT / "results" / "figures"
 METRICS_DIR = REPO_ROOT / "results" / "metrics"
-CACHE_DIR   = REPO_ROOT / "data" / "cache"
+# XCT_CACHE_DIR mirrors XCT_PROCESSED_DIR/XCT_MASKS_DIR: data/cache.py's
+# build_cache() reuses an existing <sample>_volume.npy purely by sample
+# name, with no check against which PROCESSED_DATA_DIR/MASKS_DIR built
+# it — so a run against an alternate preprocessed-data tree MUST also
+# point CACHE_DIR somewhere new, or it will silently reuse whatever was
+# cached from the default data/processed/ tree instead of rebuilding.
+CACHE_DIR   = Path(os.environ.get("XCT_CACHE_DIR", str(REPO_ROOT / "data" / "cache")))
 
 # =============================================================================
 # Directory creation — call explicitly at pipeline startup
@@ -165,19 +171,32 @@ BERNSEN_LOW_CONTRAST_THRESH = 128    # fixed fallback — only used when BERNSEN
 # fraction from this alone, even after sample-mask background removal.
 #
 # When True, the fallback threshold is instead computed per image via
-# Otsu's method restricted to the pixels inside the sample mask (or the
-# whole image if no mask is given) — adapting to each sample's own
-# brightness distribution instead of assuming one global constant fits
-# every scan.
+# src.thresholding.compute_low_contrast_threshold() — adapting to each
+# sample's own brightness distribution instead of assuming one global
+# constant fits every scan.
 #
-# Measured directly and left OFF by default: Otsu is biased when one
-# class vastly outnumbers the other (exactly the solid-vs-pore case
-# here — the same failure mode already documented for Otsu as a
-# standalone method above), and it measurably regressed samples that
-# were already fine under the fixed threshold — e.g. a near-zero-
-# porosity sample went from ~0% to ~20% "defect" fraction. Left in the
-# code as an option, not because it currently gives good results.
-BERNSEN_LOW_CONTRAST_ADAPTIVE = False
+# UPDATE: originally left OFF by default because a raw Otsu split was
+# measurably regressing already-fine samples (a near-zero-porosity
+# sample going from ~0% to ~20% "defect" fraction) — Otsu is biased
+# when one class vastly outnumbers the other (solid vastly outnumbers
+# pore in-mask), so the split landed right next to the solid phase's
+# own peak, misclassifying the normal partial-volume dip near every
+# edge as pore (a thick false-positive halo hugging the whole
+# boundary). compute_low_contrast_threshold() no longer returns the
+# raw split — it anchors to the solid phase's own histogram PEAK and
+# backs off by BERNSEN_LOW_CONTRAST_MARGIN, verified to reproduce
+# fixed=128's known-good behaviour closely on bright-solid samples
+# while still adapting correctly for a genuinely dark-averaging one.
+# Turned back ON now that the underlying computation is fixed.
+BERNSEN_LOW_CONTRAST_ADAPTIVE = True
+
+BERNSEN_LOW_CONTRAST_MARGIN = 100   # intensity units to back off below the
+                                     # solid phase's own histogram peak when
+                                     # computing the adaptive low-contrast
+                                     # threshold. Calibrated so bright-solid
+                                     # samples (peak ~190-235) land close to
+                                     # the old fixed=128 default; scales down
+                                     # automatically for a lower solid peak.
 
 # ------------------------------------------------------------------
 # Auto-DCT computation (Kim et al. 2017 method)
@@ -233,7 +252,7 @@ MIN_FG_PIXELS = 10
 # channels. Neighbours past a volume's edge are clamped (edge slice
 # repeated) rather than zero-padded. Set to 1 to fall back to the
 # original single-slice 2D behaviour.
-UNET_INPUT_SLICES = 3
+UNET_INPUT_SLICES = int(os.environ.get("XCT_UNET_INPUT_SLICES", "3"))
 
 # Evenly-spaced slices sampled per volume for the 2D dataset, instead of
 # scanning every slice. Full volumes run ~900 slices each; with the low
@@ -318,7 +337,8 @@ MLFLOW_URI        = (REPO_ROOT / "mlruns").as_uri()
 # config.py
 
 # Enable or disable sample mask detection
-USE_SAMPLE_MASK = True   # set to False if you want to skip masking
+USE_SAMPLE_MASK = False   # circular sample-boundary mask disabled entirely — thresholding
+                          # runs on the full slice, air background included
 
 # Number of pixels to erode from the detected boundary. Partial-volume
 # edge pixels (a mix of air and metal intensity right at the sample
